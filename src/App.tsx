@@ -472,6 +472,9 @@ export default function App() {
   };
 
   if (!isSupabaseConfigured) {
+    const urlMissing = !import.meta.env.VITE_SUPABASE_URL;
+    const keyMissing = !import.meta.env.VITE_SUPABASE_ANON_KEY;
+    
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
         <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl p-10 text-center space-y-6">
@@ -485,13 +488,28 @@ export default function App() {
             </p>
           </div>
           <div className="bg-slate-50 p-4 rounded-2xl text-left border border-slate-100">
-            <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">কি কি যোগ করবেন?</p>
-            <div className="space-y-2">
-              <code className="block text-[10px] bg-white p-2 rounded border border-slate-200 font-mono">VITE_SUPABASE_URL</code>
+            <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">স্ট্যাটাস:</p>
+            <div className="space-y-2 text-sm font-bold">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600">URL Status:</span>
+                <span className={urlMissing ? "text-rose-500" : "text-emerald-500"}>
+                  {urlMissing ? "Missing ❌" : "Found ✅"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600">Key Status:</span>
+                <span className={keyMissing ? "text-rose-500" : "text-emerald-500"}>
+                  {keyMissing ? "Missing ❌" : "Found ✅"}
+                </span>
+              </div>
+            </div>
+            <div className="mt-4 pt-4 border-t border-slate-200">
+              <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">প্রয়োজনীয় নাম (Keys):</p>
+              <code className="block text-[10px] bg-white p-2 rounded border border-slate-200 font-mono mb-1">VITE_SUPABASE_URL</code>
               <code className="block text-[10px] bg-white p-2 rounded border border-slate-200 font-mono">VITE_SUPABASE_ANON_KEY</code>
             </div>
           </div>
-          <p className="text-sm text-slate-400 font-bold">এগুলো যোগ করার পর পেজটি রিফ্রেশ দিন।</p>
+          <p className="text-sm text-slate-400 font-bold">সেটিংস সেভ করার পর পেজটি রিফ্রেশ দিন।</p>
         </div>
       </div>
     );
