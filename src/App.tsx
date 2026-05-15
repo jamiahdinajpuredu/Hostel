@@ -42,7 +42,9 @@ import {
   signInWithEmailAndPassword, 
   signOut, 
   onAuthStateChanged,
-  createUserWithEmailAndPassword
+  createUserWithEmailAndPassword,
+  GoogleAuthProvider,
+  signInWithPopup
 } from 'firebase/auth';
 import { db, auth } from './lib/firebase';
 import { Student, AttendanceRecord, MealType, User, AppSettings } from './types';
@@ -67,9 +69,43 @@ export default function App() {
 
   // Login States
   const [authForm, setAuthForm] = useState({ username: '', password: '', name: '', role: 'Staff' as 'Admin' | 'Staff' });
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  const handleGoogleLogin = async () => {
+    try {
+      setIsLoggingIn(true);
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      
+      const userDoc = await getDoc(doc(db, 'users', result.user.uid));
+      if (userDoc.exists()) {
+        const userData = userDoc.data() as User;
+        setCurrentUser(userData);
+        localStorage.setItem('hostel_user', JSON.stringify(userData));
+      } else if (result.user.email === 'jamiahdinajpur.edu@gmail.com') {
+        const newUser: User = { 
+          username: 'admin', 
+          name: result.user.displayName || 'Admin', 
+          role: 'Admin' 
+        };
+        await setDoc(doc(db, 'users', result.user.uid), newUser);
+        setCurrentUser(newUser);
+        localStorage.setItem('hostel_user', JSON.stringify(newUser));
+      } else {
+        alert("আপনার ইমেইলটি অনুমোদিত নয়।");
+        await signOut(auth);
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert("Error: " + err.message);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsLoggingIn(true);
     try {
       // Using firebase-based login
       // Mapping username to pseudo-email for Firebase Auth
@@ -89,6 +125,8 @@ export default function App() {
     } catch (err: any) {
       console.error(err);
       alert("ভুল ইউজারনেম বা পাসওয়ার্ড!");
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -300,7 +338,7 @@ export default function App() {
   const initializeAdmin = async () => {
     try {
       const email = "admin@hostel.internal";
-      const userCredential = await createUserWithEmailAndPassword(auth, email, "1234");
+      const userCredential = await createUserWithEmailAndPassword(auth, email, "admin123");
       
       const newUser: User = { 
         username: 'admin', 
@@ -310,7 +348,7 @@ export default function App() {
 
       await setDoc(doc(db, 'users', userCredential.user.uid), newUser);
       
-      alert("System Initialized! You can now login with admin / 1234");
+      alert("System Initialized! You can now login with admin / admin123");
       setSystemEmpty(false);
     } catch (err: any) {
       console.error(err);
@@ -397,8 +435,26 @@ export default function App() {
                     placeholder="আপনার পাসওয়ার্ড"
                   />
                 </div>
-                <button className="w-full bg-indigo-600 text-white py-5 rounded-xl font-black shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 hover:scale-[1.02] active:scale-95 transition-all">
-                  লগইন করুন
+                <button 
+                  disabled={isLoggingIn}
+                  className="w-full bg-indigo-600 text-white py-5 rounded-xl font-black shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
+                >
+                  {isLoggingIn ? "প্রসেসিং..." : "লগইন করুন"}
+                </button>
+
+                <div className="relative my-4">
+                  <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
+                  <div className="relative flex justify-center text-[10px] uppercase font-bold"><span className="bg-white px-2 text-slate-400">অথবা</span></div>
+                </div>
+
+                <button 
+                  type="button"
+                  onClick={handleGoogleLogin}
+                  disabled={isLoggingIn}
+                  className="w-full bg-white border border-slate-200 text-slate-700 py-4 rounded-xl font-bold hover:bg-slate-50 transition-all flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50"
+                >
+                  <img src="https://www.gstatic.com/firebase/anonymous-scan/94c8e76f5b/google.svg" alt="Google" className="w-5 h-5" />
+                  গুগল দিয়ে লগইন
                 </button>
               </form>
             )}
