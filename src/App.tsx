@@ -68,7 +68,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
 
   // Login States
-  const [authForm, setAuthForm] = useState({ username: '', password: '', name: '', role: 'Staff' as 'Admin' | 'Staff' });
+  const [authForm, setAuthForm] = useState({ username: '', password: '', name: '', role: 'Staff' as 'Admin' | 'Staff' | 'Viewer' });
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const handleGoogleLogin = async () => {
@@ -647,7 +647,14 @@ export default function App() {
               { id: 'students', label: 'ছাত্র প্রোফাইল', icon: UserCircle2 },
               { id: 'reports', label: 'Summary Report', icon: FileBarChart2 },
               { id: 'users', label: 'সেটিংস', icon: Settings },
-            ].filter(b => b.id !== 'users' || currentUser?.role === 'Admin').map((btn) => (
+            ].filter(b => {
+              if (!currentUser) return false;
+              if (b.id === 'users') return currentUser.role === 'Admin';
+              if (currentUser.role === 'Viewer') {
+                return ['dashboard', 'students', 'reports'].includes(b.id);
+              }
+              return true;
+            }).map((btn) => (
               <button 
                 key={btn.id}
                 onClick={() => setView(btn.id as any)}
@@ -1249,11 +1256,12 @@ export default function App() {
                       <label className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">রোল (Role)</label>
                       <select 
                         value={authForm.role}
-                        onChange={e => setAuthForm(prev => ({ ...prev, role: e.target.value as 'Admin' | 'Staff' }))}
+                        onChange={e => setAuthForm(prev => ({ ...prev, role: e.target.value as 'Admin' | 'Staff' | 'Viewer' }))}
                         className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-2 text-sm outline-none"
                       >
                         <option value="Staff">Staff</option>
                         <option value="Admin">Admin</option>
+                        <option value="Viewer">Viewer</option>
                       </select>
                     </div>
                     <button 
@@ -1341,7 +1349,11 @@ export default function App() {
                           <td className="px-8 py-4 font-bold">{u.name}</td>
                           <td className="px-8 py-4 font-mono text-sm text-indigo-600">{u.username}</td>
                           <td className="px-8 py-4">
-                            <span className={`px-3 py-1 rounded-full text-[10px] font-black tracking-widest uppercase ${u.role === 'Admin' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                            <span className={`px-3 py-1 rounded-full text-[10px] font-black tracking-widest uppercase ${
+                              u.role === 'Admin' ? 'bg-amber-100 text-amber-700' : 
+                              u.role === 'Viewer' ? 'bg-blue-100 text-blue-600' : 
+                              'bg-slate-100 text-slate-600'
+                            }`}>
                               {u.role}
                             </span>
                           </td>

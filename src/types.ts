@@ -8,7 +8,7 @@ export interface Student {
 export interface User {
   username: string;
   name: string;
-  role: 'Admin' | 'Staff';
+  role: 'Admin' | 'Staff' | 'Viewer';
 }
 
 export type MealType = 'Breakfast' | 'Lunch' | 'Dinner';
