@@ -67,6 +67,18 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState<'All' | 'Present' | 'Absent'>('All');
   const [isEditMode, setIsEditMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Manual Student Entry State
   const [studentForm, setStudentForm] = useState({ studentId: '', name: '', className: '', roomNumber: '' });
@@ -442,6 +454,19 @@ export default function App() {
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-indigo-900 flex items-center justify-center p-4">
+        <AnimatePresence>
+          {!isOnline && (
+            <motion.div 
+              initial={{ y: -50, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: -50, opacity: 0 }}
+              className="fixed top-0 left-0 right-0 z-[100] bg-rose-600 text-white py-2 px-4 text-center text-xs font-bold flex items-center justify-center gap-2 shadow-lg"
+            >
+              <XCircle size={14} />
+              আপনার ইন্টারনেট সংযোগ বিচ্ছিন্ন! মোবাইল ডাটা চেক করুন। 
+            </motion.div>
+          )}
+        </AnimatePresence>
         <style>{`
           @import url('https://cdn.jsdelivr.net/gh/maateen/solaimanlipi@master/solaimanlipi.css');
           * { font-family: 'SolaimanLipi', sans-serif !important; }
@@ -546,14 +571,22 @@ export default function App() {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-        <div className="flex flex-col items-center gap-6">
+        <div className="flex flex-col items-center gap-6 text-center">
           <div className="relative">
             <div className="w-16 h-16 border-4 border-slate-200 rounded-full"></div>
             <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin absolute top-0 left-0"></div>
           </div>
           <div className="flex flex-col items-center gap-2">
             <p className="text-indigo-600 text-lg font-black animate-pulse">প্রসেসিং হচ্ছে...</p>
-            <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">দয়া করে অপেক্ষা করুন</p>
+            <p className="text-slate-400 text-xs font-bold uppercase tracking-widest leading-relaxed">
+              দয়া করে অপেক্ষা করুন<br/>
+              <span className="text-[10px] lowercase italic">(ইন্টারনেট স্লো থাকলে কিছুক্ষণ সময় নিতে পারে)</span>
+            </p>
+            {!isOnline && (
+              <div className="mt-4 p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-600 text-xs font-bold">
+                আপনার ইন্টারনেট সংযোগ নেই!
+              </div>
+            )}
           </div>
         </div>
       </div>
