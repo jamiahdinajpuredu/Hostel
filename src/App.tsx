@@ -47,6 +47,7 @@ import {
   signInWithPopup
 } from 'firebase/auth';
 import { db, auth, adminAuth } from './lib/firebase';
+import { handleFirestoreError, OperationType, FirestoreErrorInfo } from './lib/firestoreErrorHandler';
 import { Student, AttendanceRecord, MealType, User, AppSettings } from './types';
 
 export default function App() {
@@ -68,6 +69,18 @@ export default function App() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
+
+  useEffect(() => {
+    const handleError = (e: any) => {
+      const detail = (e as CustomEvent<FirestoreErrorInfo>).detail;
+      if (detail.error.includes('Quota exceeded') || detail.error.includes('resource-exhausted')) {
+        setQuotaExceeded(true);
+      }
+    };
+    window.addEventListener('firestore-error', handleError);
+    return () => window.removeEventListener('firestore-error', handleError);
+  }, []);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -113,8 +126,7 @@ export default function App() {
         await signOut(auth);
       }
     } catch (err: any) {
-      console.error(err);
-      alert("Error: " + err.message);
+      handleFirestoreError(err, OperationType.WRITE, 'users');
     } finally {
       setIsLoggingIn(false);
     }
@@ -141,6 +153,7 @@ export default function App() {
         alert("User record not found in database.");
       }
     } catch (err: any) {
+      if (err.message?.includes('FirestoreErrorInfo')) throw err;
       console.error(err);
       alert("ভুল ইউজারনেম বা পাসওয়ার্ড!");
     } finally {
@@ -172,11 +185,10 @@ export default function App() {
       alert("ইউজার তৈরি সফল!");
       setAuthForm({ username: '', password: '', name: '', role: 'Staff' });
     } catch (err: any) {
-      console.error(err);
       if (err.code === 'auth/email-already-in-use') {
         alert("এই ইউজারনেমটি (Username) ইতিমধ্যে ব্যবহার করা হয়েছে। দয়া করে অন্য একটি ইউজারনেম চেষ্টা করুন। যদি আপনি এই ইউজারটি আগে ডিলিট করে থাকেন, তবে Firebase Console থেকে তাকে পুরোপুরি রিমুভ করতে হবে।");
       } else {
-        alert(err.message || "ব্যর্থ হয়েছে!");
+        handleFirestoreError(err, OperationType.WRITE, 'users');
       }
     }
   };
@@ -193,7 +205,7 @@ export default function App() {
       await deleteDoc(doc(db, 'users', uid));
       alert("ইউজার ডাটা ডিলিট সফল!");
     } catch (err) {
-      alert("ডিলিট ব্যর্থ হয়েছে।");
+      handleFirestoreError(err, OperationType.DELETE, 'users/' + uid);
     }
   };
 
@@ -211,8 +223,7 @@ export default function App() {
       alert("ছাত্র যোগ করা সফল হয়েছে!");
       setStudentForm({ studentId: '', name: '', className: '', roomNumber: '' });
     } catch (err: any) {
-      console.error(err);
-      alert("ব্যর্থ হয়েছে: " + err.message);
+      handleFirestoreError(err, OperationType.WRITE, 'students');
     }
   };
 
@@ -222,7 +233,7 @@ export default function App() {
       await deleteDoc(doc(db, 'students', id));
       alert("ছাত্র ডিলিট সফল!");
     } catch (err) {
-      alert("ডিলিট ব্যর্থ হয়েছে।");
+      handleFirestoreError(err, OperationType.DELETE, 'students/' + id);
     }
   };
 
@@ -254,11 +265,15 @@ export default function App() {
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
-        if (userDoc.exists()) {
-          const userData = userDoc.data() as User;
-          setCurrentUser(userData);
-          localStorage.setItem('hostel_user', JSON.stringify(userData));
+        try {
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (userDoc.exists()) {
+            const userData = userDoc.data() as User;
+            setCurrentUser(userData);
+            localStorage.setItem('hostel_user', JSON.stringify(userData));
+          }
+        } catch (error) {
+          handleFirestoreError(error, OperationType.GET, 'users/' + user.uid);
         }
       } else {
         setCurrentUser(null);
@@ -281,6 +296,8 @@ export default function App() {
     const unsubStudents = onSnapshot(collection(db, 'students'), (snapshot) => {
       const data = snapshot.docs.map(d => d.data() as Student);
       setStudents(data);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'students');
     });
 
     // Attendance listener for selected date
@@ -289,6 +306,8 @@ export default function App() {
       const data = snapshot.docs.map(d => d.data() as AttendanceRecord);
       setAttendance(data);
       setIsLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'attendance');
     });
 
     // Settings listener
@@ -296,6 +315,8 @@ export default function App() {
       if (doc.exists()) {
         setSettings(doc.data() as AppSettings);
       }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'settings/config');
     });
 
     // Users listener (Admin only)
@@ -304,6 +325,8 @@ export default function App() {
       unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
         const data = snapshot.docs.map(d => ({ ...d.data(), uid: d.id } as User & { uid: string }));
         setUsers(data as any);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.GET, 'users');
       });
     }
 
@@ -415,12 +438,7 @@ export default function App() {
           setSystemEmpty(false);
         }
       } catch (e: any) {
-        // If we get a permission error, it's likely rules are still propagating or there's a config issue
-        console.warn("Check init failed (likely propagation):", e.message);
-        if (e.message.includes('insufficient permissions')) {
-          // Assume not empty to allow login attempts while rules propagate
-          setSystemEmpty(false);
-        }
+        handleFirestoreError(e, OperationType.LIST, 'users');
       }
     };
     checkInit();
@@ -442,11 +460,10 @@ export default function App() {
       alert("System Initialized! You can now login with admin / admin123");
       setSystemEmpty(false);
     } catch (err: any) {
-      console.error(err);
       if (err.code === 'auth/operation-not-allowed') {
         alert("ভুল: Firebase Console এ 'Email/Password' অথেনটিকেশন এনাবল করা নেই। অনুগ্রহ করে Firebase কনসোল থেকে Authentication > Sign-in method এ গিয়ে Email/Password এনাবল করুন।");
       } else {
-        alert("Initialization failed: " + err.message);
+        handleFirestoreError(err, OperationType.WRITE, 'users');
       }
     }
   };
@@ -490,7 +507,7 @@ export default function App() {
                   <span>D</span>
                 )}
               </div>
-              <h1 className="text-3xl font-black tracking-tight mb-2">বোডিং রুম</h1>
+              <h1 className="text-3xl font-black tracking-tight mb-2">বোডিং ম্যানেজমেন্ট</h1>
               <p className="text-[10px] text-indigo-300 uppercase font-black tracking-[0.3em] opacity-80">Institutional Entry System</p>
             </div>
           </div>
@@ -564,6 +581,49 @@ export default function App() {
             )}
           </div>
         </motion.div>
+      </div>
+    );
+  }
+
+  if (quotaExceeded) {
+    return (
+      <div className="min-h-screen bg-rose-50 flex items-center justify-center p-6 sm:p-10">
+        <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl overflow-hidden border border-rose-100">
+          <div className="bg-rose-600 p-8 text-white text-center">
+            <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 backdrop-blur-md">
+              <XCircle size={40} />
+            </div>
+            <h2 className="text-2xl font-black mb-2">কোটা শেষ হয়ে গেছে!</h2>
+            <p className="text-rose-100 text-sm font-bold uppercase tracking-widest">Quota Limit Exceeded</p>
+          </div>
+          <div className="p-8 space-y-6 text-center">
+            <p className="text-slate-600 font-medium leading-relaxed">
+              দুঃখিত, আজ এই প্রজেক্টের জন্য নির্ধারিত ফ্রি ব্যবহারের সীমা (Limit) শেষ হয়ে গেছে। 
+              এটি সাধারণত বড় প্রজেক্টের ক্ষেত্রে হয়ে থাকে যখন অনেক ভিজিটর বা ডাটা লোড হয়।
+            </p>
+            <div className="space-y-4">
+              <div className="bg-slate-50 p-4 rounded-2xl text-left space-y-2">
+                <p className="text-xs font-black text-slate-400 uppercase tracking-widest">কি করতে পারেন?</p>
+                <ul className="text-sm text-slate-700 space-y-2 font-bold">
+                  <li className="flex items-start gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 mt-1.5 shrink-0" />
+                    আগামীকাল পর্যন্ত অপেক্ষা করুন (কোটা প্রতিদিন রিসেট হয়)।
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 mt-1.5 shrink-0" />
+                    Firebase Console থেকে Billing এ গিয়ে 'Pay as you go' (Blaze) প্ল্যান নিয়ে লিমিট বাড়াতে পারেন।
+                  </li>
+                </ul>
+              </div>
+            </div>
+            <button 
+              onClick={() => window.location.reload()} 
+              className="w-full bg-slate-900 text-white py-4 rounded-xl font-black shadow-lg shadow-slate-900/10 hover:bg-slate-800 transition-all"
+            >
+              পুনরায় চেষ্টা করুন
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -644,8 +704,7 @@ export default function App() {
       setIsEditMode(false);
       alert("হাজিরা সফলভাবে সাবমিট করা হয়েছে!");
     } catch (error) {
-      console.error("Failed to submit attendance", error);
-      alert("সাবমিট ব্যর্থ হয়েছে।");
+      handleFirestoreError(error, OperationType.WRITE, 'batch/attendance');
     }
   };
 
@@ -686,8 +745,7 @@ export default function App() {
           await batch.commit();
           alert(`${newStudents.length} জন ছাত্রের ডাটা আপলোড সফল হয়েছে!`);
         } catch (error) {
-          console.error("Upload failed", error);
-          alert("আপলোড ব্যর্থ হয়েছে। আবার চেষ্টা করুন।");
+          handleFirestoreError(error, OperationType.WRITE, 'batch/students');
         }
       }
     };
@@ -1580,8 +1638,7 @@ export default function App() {
                           await setDoc(doc(db, 'settings', 'config'), settings);
                           alert("লোগো আপডেট সফল হয়েছে!");
                         } catch (err: any) {
-                          console.error(err);
-                          alert("আপডেট ব্যর্থ হয়েছে: " + err.message);
+                          handleFirestoreError(err, OperationType.WRITE, 'settings/config');
                         }
                       }}
                       className="bg-slate-900 text-white px-8 py-2 rounded-lg font-bold text-sm hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/10"
