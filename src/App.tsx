@@ -262,6 +262,7 @@ export default function App() {
   // Dashboard Calculations
   const dashboardStats = useMemo(() => {
     const totalStudents = students.length;
+    
     const roomStats: { [room: string]: { total: number, present: number, absent: number } } = {};
     
     students.forEach(s => {
@@ -279,20 +280,28 @@ export default function App() {
       }
     });
 
-    const totalPresent = Object.values(roomStats).reduce((sum, r) => sum + r.present, 0);
-    const totalAbsent = Object.values(roomStats).reduce((sum, r) => sum + r.absent, 0);
+    const allRoomEntries = Object.entries(roomStats).sort(([a], [b]) => a.localeCompare(b));
+    
+    // Global summary stays global
+    const totalPresent = allRoomEntries.reduce((sum, [, r]) => sum + r.present, 0);
+    const totalAbsent = allRoomEntries.reduce((sum, [, r]) => sum + r.absent, 0);
     const totalRecorded = totalPresent + totalAbsent;
     const attendancePercentage = totalStudents > 0 ? (totalPresent / totalStudents) * 100 : 0;
 
+    // Only filter the room stats list for "রুম ভিত্তিক রিপোর্ট"
+    const filteredRoomEntries = roomFilter === 'All' 
+      ? allRoomEntries 
+      : allRoomEntries.filter(([room]) => room === roomFilter);
+
     return {
       totalStudents,
-      roomStats: Object.entries(roomStats).sort(([a], [b]) => a.localeCompare(b)),
+      roomStats: filteredRoomEntries,
       totalPresent,
       totalAbsent,
       totalRecorded,
       attendancePercentage
     };
-  }, [students, attendance, selectedMeal]);
+  }, [students, attendance, selectedMeal, roomFilter]);
 
   // Group students by room
   const studentsByRoom = useMemo(() => {
