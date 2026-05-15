@@ -46,7 +46,7 @@ import {
   GoogleAuthProvider,
   signInWithPopup
 } from 'firebase/auth';
-import { db, auth } from './lib/firebase';
+import { db, auth, adminAuth } from './lib/firebase';
 import { Student, AttendanceRecord, MealType, User, AppSettings } from './types';
 
 export default function App() {
@@ -134,7 +134,8 @@ export default function App() {
     if (e) e.preventDefault();
     try {
       const email = `${authForm.username.toLowerCase()}@hostel.internal`;
-      const userCredential = await createUserWithEmailAndPassword(auth, email, authForm.password);
+      // Use adminAuth (secondary instance) to create user so primary auth (admin) stays logged in
+      const userCredential = await createUserWithEmailAndPassword(adminAuth, email, authForm.password);
       
       const newUser: User = { 
         username: authForm.username, 
@@ -142,13 +143,23 @@ export default function App() {
         role: authForm.role || 'Staff' 
       };
 
+      // Now we use the primary 'db' instance. 
+      // Since the primary 'auth' instance (the one used by 'db') is still logged in as Admin,
+      // the security rules will allow this write.
       await setDoc(doc(db, 'users', userCredential.user.uid), newUser);
+      
+      // We should sign out the user from the SECONDARY instance to keep it clean
+      await signOut(adminAuth);
       
       alert("ইউজার তৈরি সফল!");
       setAuthForm({ username: '', password: '', name: '', role: 'Staff' });
     } catch (err: any) {
       console.error(err);
-      alert(err.message || "ব্যর্থ হয়েছে!");
+      if (err.code === 'auth/email-already-in-use') {
+        alert("এই ইউজারনেমটি (Username) ইতিমধ্যে ব্যবহার করা হয়েছে। দয়া করে অন্য একটি ইউজারনেম চেষ্টা করুন। যদি আপনি এই ইউজারটি আগে ডিলিট করে থাকেন, তবে Firebase Console থেকে তাকে পুরোপুরি রিমুভ করতে হবে।");
+      } else {
+        alert(err.message || "ব্যর্থ হয়েছে!");
+      }
     }
   };
 

@@ -7,6 +7,10 @@ const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId); /* CRITICAL: The app will break without this line */
 export const auth = getAuth(app);
 
+// Secondary app for admin operations (creating users without signing out current admin)
+const adminApp = initializeApp(firebaseConfig, 'AdminApp');
+export const adminAuth = getAuth(adminApp);
+
 // Connectivity check
 async function testConnection() {
   try {
