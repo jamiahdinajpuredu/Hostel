@@ -67,6 +67,9 @@ export default function App() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Manual Student Entry State
+  const [studentForm, setStudentForm] = useState({ studentId: '', name: '', className: '', roomNumber: '' });
+
   // Login States
   const [authForm, setAuthForm] = useState({ username: '', password: '', name: '', role: 'Staff' as 'Admin' | 'Staff' | 'Viewer' });
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -176,6 +179,35 @@ export default function App() {
     try {
       await deleteDoc(doc(db, 'users', uid));
       alert("ইউজার ডাটা ডিলিট সফল!");
+    } catch (err) {
+      alert("ডিলিট ব্যর্থ হয়েছে।");
+    }
+  };
+
+  const handleAddStudent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!studentForm.studentId || !studentForm.name || !studentForm.className || !studentForm.roomNumber) {
+      alert("সবগুলো ঘর পূরণ করুন।");
+      return;
+    }
+    try {
+      await setDoc(doc(db, 'students', studentForm.studentId.trim()), {
+        ...studentForm,
+        studentId: studentForm.studentId.trim()
+      });
+      alert("ছাত্র যোগ করা সফল হয়েছে!");
+      setStudentForm({ studentId: '', name: '', className: '', roomNumber: '' });
+    } catch (err: any) {
+      console.error(err);
+      alert("ব্যর্থ হয়েছে: " + err.message);
+    }
+  };
+
+  const handleDeleteStudent = async (id: string) => {
+    if (!confirm("আপনি কি নিশ্চিতভাবে এই ছাত্রের তথ্য ডিলিট করতে চান?")) return;
+    try {
+      await deleteDoc(doc(db, 'students', id));
+      alert("ছাত্র ডিলিট সফল!");
     } catch (err) {
       alert("ডিলিট ব্যর্থ হয়েছে।");
     }
@@ -1090,9 +1122,66 @@ export default function App() {
                 exit={{ opacity: 0, x: -20 }}
                 className="flex flex-col h-full"
               >
-                 <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
-                    <h2 className="text-xl font-bold">ছাত্র প্রোফাইল ডাটাবেস</h2>
-                    <p className="text-sm text-slate-500">মোট ছাত্র: {students.length} জন</p>
+                 <div className="p-6 border-b border-slate-100 flex flex-col lg:flex-row lg:justify-between lg:items-center gap-4 shrink-0">
+                    <div>
+                      <h2 className="text-xl font-bold">ছাত্র প্রোফাইল ডাটাবেস</h2>
+                      <p className="text-sm text-slate-500">মোট ছাত্র: {students.length} জন</p>
+                    </div>
+                    
+                    {currentUser.role !== 'Viewer' && (
+                      <form onSubmit={handleAddStudent} className="flex flex-wrap items-end gap-3 bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">ID</label>
+                          <input 
+                            required
+                            type="text" 
+                            value={studentForm.studentId}
+                            onChange={e => setStudentForm(prev => ({ ...prev, studentId: e.target.value }))}
+                            className="bg-white border border-indigo-200 rounded-lg px-3 py-1.5 text-xs w-24 outline-none focus:ring-2 focus:ring-indigo-500/20"
+                            placeholder="ID"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Name</label>
+                          <input 
+                            required
+                            type="text" 
+                            value={studentForm.name}
+                            onChange={e => setStudentForm(prev => ({ ...prev, name: e.target.value }))}
+                            className="bg-white border border-indigo-200 rounded-lg px-3 py-1.5 text-xs w-32 lg:w-48 outline-none focus:ring-2 focus:ring-indigo-500/20"
+                            placeholder="Name"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Class</label>
+                          <input 
+                            required
+                            type="text" 
+                            value={studentForm.className}
+                            onChange={e => setStudentForm(prev => ({ ...prev, className: e.target.value }))}
+                            className="bg-white border border-indigo-200 rounded-lg px-3 py-1.5 text-xs w-20 outline-none focus:ring-2 focus:ring-indigo-500/20"
+                            placeholder="Class"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Room No</label>
+                          <input 
+                            required
+                            type="text" 
+                            value={studentForm.roomNumber}
+                            onChange={e => setStudentForm(prev => ({ ...prev, roomNumber: e.target.value }))}
+                            className="bg-white border border-indigo-200 rounded-lg px-3 py-1.5 text-xs w-20 outline-none focus:ring-2 focus:ring-indigo-500/20"
+                            placeholder="Room"
+                          />
+                        </div>
+                        <button 
+                          type="submit"
+                          className="bg-indigo-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-indigo-700 transition-all shadow-md shadow-indigo-200"
+                        >
+                          সংযুক্ত করুন
+                        </button>
+                      </form>
+                    )}
                  </div>
                  
                  <div className="flex-1 overflow-auto no-scrollbar">
@@ -1104,6 +1193,7 @@ export default function App() {
                           <th className="px-8 py-4">Name (নাম)</th>
                           <th className="px-8 py-4">Class</th>
                           <th className="px-8 py-4">Room No.</th>
+                          {currentUser.role !== 'Viewer' && <th className="px-8 py-4 text-right">Action</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -1117,6 +1207,17 @@ export default function App() {
                             <td className="px-8 py-4">
                               <span className="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-[10px] font-black tracking-tighter">ROOM {s.roomNumber}</span>
                             </td>
+                            {currentUser.role !== 'Viewer' && (
+                              <td className="px-8 py-4 text-right">
+                                <button 
+                                  onClick={() => handleDeleteStudent(s.studentId)}
+                                  className="text-rose-400 hover:text-rose-600 transition-colors"
+                                  title="ডিলিট"
+                                >
+                                  <XCircle size={16} />
+                                </button>
+                              </td>
+                            )}
                           </tr>
                         ))}
                       </tbody>
