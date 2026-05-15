@@ -25,29 +25,7 @@ import {
   LineChart
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  collection, 
-  getDocs, 
-  setDoc, 
-  doc, 
-  query, 
-  where, 
-  onSnapshot, 
-  deleteDoc,
-  getDoc,
-  writeBatch,
-  serverTimestamp
-} from 'firebase/firestore';
-import { 
-  signInWithEmailAndPassword, 
-  signOut, 
-  onAuthStateChanged,
-  createUserWithEmailAndPassword,
-  GoogleAuthProvider,
-  signInWithPopup
-} from 'firebase/auth';
-import { db, auth, adminAuth } from './lib/firebase';
-import { handleFirestoreError, OperationType, FirestoreErrorInfo } from './lib/firestoreErrorHandler';
+import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { Student, AttendanceRecord, MealType, User, AppSettings } from './types';
 
 export default function App() {
@@ -69,18 +47,6 @@ export default function App() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [quotaExceeded, setQuotaExceeded] = useState(false);
-
-  useEffect(() => {
-    const handleError = (e: any) => {
-      const detail = (e as CustomEvent<FirestoreErrorInfo>).detail;
-      if (detail.error.includes('Quota exceeded') || detail.error.includes('resource-exhausted')) {
-        setQuotaExceeded(true);
-      }
-    };
-    window.addEventListener('firestore-error', handleError);
-    return () => window.removeEventListener('firestore-error', handleError);
-  }, []);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -103,30 +69,12 @@ export default function App() {
   const handleGoogleLogin = async () => {
     try {
       setIsLoggingIn(true);
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      
-      const userDoc = await getDoc(doc(db, 'users', result.user.uid));
-      if (userDoc.exists()) {
-        const userData = userDoc.data() as User;
-        setCurrentUser(userData);
-        localStorage.setItem('hostel_user', JSON.stringify(userData));
-        setView('dashboard');
-      } else if (result.user.email === 'jamiahdinajpur.edu@gmail.com') {
-        const newUser: User = { 
-          username: 'admin', 
-          name: result.user.displayName || 'Admin', 
-          role: 'Admin' 
-        };
-        await setDoc(doc(db, 'users', result.user.uid), newUser);
-        setCurrentUser(newUser);
-        localStorage.setItem('hostel_user', JSON.stringify(newUser));
-      } else {
-        alert("আপনার ইমেইলটি অনুমোদিত নয়।");
-        await signOut(auth);
-      }
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+      });
+      if (error) throw error;
     } catch (err: any) {
-      handleFirestoreError(err, OperationType.WRITE, 'users');
+      alert("Error: " + err.message);
     } finally {
       setIsLoggingIn(false);
     }
@@ -136,24 +84,30 @@ export default function App() {
     e.preventDefault();
     setIsLoggingIn(true);
     try {
-      // Using firebase-based login
-      // Mapping username to pseudo-email for Firebase Auth
       const email = `${authForm.username.toLowerCase()}@hostel.internal`;
-      const userCredential = await signInWithEmailAndPassword(auth, email, authForm.password);
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password: authForm.password,
+      });
       
-      // Get user details from Firestore
-      const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
-      if (userDoc.exists()) {
-        const userData = userDoc.data() as User;
-        setCurrentUser(userData);
-        localStorage.setItem('hostel_user', JSON.stringify(userData));
-        setView('dashboard');
-      } else {
-        // Fallback or legacy check (if user exists in auth but not in firestore)
-        alert("User record not found in database.");
+      if (error) throw error;
+
+      if (data.user) {
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', data.user.id)
+          .single();
+        
+        if (userData) {
+          setCurrentUser(userData as User);
+          localStorage.setItem('hostel_user', JSON.stringify(userData));
+          setView('dashboard');
+        } else {
+          alert("User record not found in database.");
+        }
       }
     } catch (err: any) {
-      if (err.message?.includes('FirestoreErrorInfo')) throw err;
       console.error(err);
       alert("ভুল ইউজারনেম বা পাসওয়ার্ড!");
     } finally {
@@ -165,47 +119,57 @@ export default function App() {
     if (e) e.preventDefault();
     try {
       const email = `${authForm.username.toLowerCase()}@hostel.internal`;
-      // Use adminAuth (secondary instance) to create user so primary auth (admin) stays logged in
-      const userCredential = await createUserWithEmailAndPassword(adminAuth, email, authForm.password);
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password: authForm.password,
+        options: {
+          data: {
+            username: authForm.username,
+            full_name: authForm.name,
+          }
+        }
+      });
       
-      const newUser: User = { 
-        username: authForm.username, 
-        name: authForm.name, 
-        role: authForm.role || 'Staff' 
-      };
+      if (error) throw error;
 
-      // Now we use the primary 'db' instance. 
-      // Since the primary 'auth' instance (the one used by 'db') is still logged in as Admin,
-      // the security rules will allow this write.
-      await setDoc(doc(db, 'users', userCredential.user.uid), newUser);
-      
-      // We should sign out the user from the SECONDARY instance to keep it clean
-      await signOut(adminAuth);
+      if (data.user) {
+        const newUser: User = { 
+          username: authForm.username, 
+          name: authForm.name, 
+          role: authForm.role || 'Staff' 
+        };
+
+        const { error: dbError } = await supabase
+          .from('users')
+          .insert({ id: data.user.id, ...newUser });
+
+        if (dbError) throw dbError;
+      }
       
       alert("ইউজার তৈরি সফল!");
       setAuthForm({ username: '', password: '', name: '', role: 'Staff' });
     } catch (err: any) {
-      if (err.code === 'auth/email-already-in-use') {
-        alert("এই ইউজারনেমটি (Username) ইতিমধ্যে ব্যবহার করা হয়েছে। দয়া করে অন্য একটি ইউজারনেম চেষ্টা করুন। যদি আপনি এই ইউজারটি আগে ডিলিট করে থাকেন, তবে Firebase Console থেকে তাকে পুরোপুরি রিমুভ করতে হবে।");
-      } else {
-        handleFirestoreError(err, OperationType.WRITE, 'users');
-      }
+      alert(err.message || "ব্যর্থ হয়েছে!");
     }
   };
 
   const handleLogout = async () => {
-    await signOut(auth);
+    await supabase.auth.signOut();
     setCurrentUser(null);
     localStorage.removeItem('hostel_user');
   };
 
-  const handleDeleteUser = async (uid: string) => {
-    if (!confirm("Are you sure you want to delete this user? (Auth record must be deleted manually in Firebase Console)")) return;
+  const handleDeleteUser = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this user?")) return;
     try {
-      await deleteDoc(doc(db, 'users', uid));
+      const { error } = await supabase
+        .from('users')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
       alert("ইউজার ডাটা ডিলিট সফল!");
-    } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, 'users/' + uid);
+    } catch (err: any) {
+      alert("ডিলিট ব্যর্থ হয়েছে: " + err.message);
     }
   };
 
@@ -216,24 +180,35 @@ export default function App() {
       return;
     }
     try {
-      await setDoc(doc(db, 'students', studentForm.studentId.trim()), {
-        ...studentForm,
-        studentId: studentForm.studentId.trim()
-      });
+      const { error } = await supabase
+        .from('students')
+        .upsert({
+          student_id: studentForm.studentId.trim(),
+          name: studentForm.name,
+          class_name: studentForm.className,
+          room_number: studentForm.roomNumber
+        });
+      
+      if (error) throw error;
+
       alert("ছাত্র যোগ করা সফল হয়েছে!");
       setStudentForm({ studentId: '', name: '', className: '', roomNumber: '' });
     } catch (err: any) {
-      handleFirestoreError(err, OperationType.WRITE, 'students');
+      alert("ব্যর্থ হয়েছে: " + err.message);
     }
   };
 
   const handleDeleteStudent = async (id: string) => {
     if (!confirm("আপনি কি নিশ্চিতভাবে এই ছাত্রের তথ্য ডিলিট করতে চান?")) return;
     try {
-      await deleteDoc(doc(db, 'students', id));
+      const { error } = await supabase
+        .from('students')
+        .delete()
+        .eq('student_id', id);
+      if (error) throw error;
       alert("ছাত্র ডিলিট সফল!");
-    } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, 'students/' + id);
+    } catch (err: any) {
+      alert("ডিলিট ব্যর্থ হয়েছে: " + err.message);
     }
   };
 
@@ -261,19 +236,23 @@ export default function App() {
     return stats;
   }, [students, attendance, roomFilter]);
 
-  // Load initial data and Sync with Firebase
+  // Load initial data and Sync with Supabase
   useEffect(() => {
-    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
-      if (user) {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
         try {
-          const userDoc = await getDoc(doc(db, 'users', user.uid));
-          if (userDoc.exists()) {
-            const userData = userDoc.data() as User;
-            setCurrentUser(userData);
+          const { data: userData, error } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+          
+          if (userData) {
+            setCurrentUser(userData as User);
             localStorage.setItem('hostel_user', JSON.stringify(userData));
           }
         } catch (error) {
-          handleFirestoreError(error, OperationType.GET, 'users/' + user.uid);
+          console.error("User fetch error:", error);
         }
       } else {
         setCurrentUser(null);
@@ -281,7 +260,7 @@ export default function App() {
       }
     });
 
-    return () => unsubscribeAuth();
+    return () => subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -291,50 +270,74 @@ export default function App() {
     }
     
     setIsLoading(true);
-    
-    // Students listener
-    const unsubStudents = onSnapshot(collection(db, 'students'), (snapshot) => {
-      const data = snapshot.docs.map(d => d.data() as Student);
-      setStudents(data);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'students');
-    });
 
-    // Attendance listener for selected date
-    const attendanceQuery = query(collection(db, 'attendance'), where('date', '==', selectedDate));
-    const unsubAttendance = onSnapshot(attendanceQuery, (snapshot) => {
-      const data = snapshot.docs.map(d => d.data() as AttendanceRecord);
-      setAttendance(data);
-      setIsLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'attendance');
-    });
+    const fetchData = async () => {
+      try {
+        // Students
+        const { data: studentsData } = await supabase.from('students').select('*');
+        if (studentsData) {
+          setStudents(studentsData.map(s => ({
+            studentId: s.student_id,
+            name: s.name,
+            className: s.class_name,
+            roomNumber: s.room_number
+          })));
+        }
 
-    // Settings listener
-    const unsubSettings = onSnapshot(doc(db, 'settings', 'config'), (doc) => {
-      if (doc.exists()) {
-        setSettings(doc.data() as AppSettings);
+        // Attendance
+        const { data: attendanceData } = await supabase
+          .from('attendance')
+          .select('*')
+          .eq('date', selectedDate);
+        if (attendanceData) {
+          setAttendance(attendanceData.map(a => ({
+            studentId: a.student_id,
+            date: a.date,
+            mealType: a.meal_type,
+            status: a.status,
+            timestamp: a.timestamp,
+            recordedBy: a.recorded_by
+          })));
+        }
+
+        // Settings
+        const { data: settingsData } = await supabase
+          .from('settings')
+          .select('*')
+          .eq('key', 'config')
+          .single();
+        if (settingsData) {
+          setSettings(settingsData.value);
+        }
+
+        // Users
+        if (currentUser.role === 'Admin') {
+          const { data: usersData } = await supabase.from('users').select('*');
+          if (usersData) setUsers(usersData as User[]);
+        }
+      } catch (err) {
+        console.error("Data fetch error:", err);
+      } finally {
+        setIsLoading(false);
       }
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'settings/config');
-    });
+    };
 
-    // Users listener (Admin only)
-    let unsubUsers = () => {};
-    if (currentUser.role === 'Admin') {
-      unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
-        const data = snapshot.docs.map(d => ({ ...d.data(), uid: d.id } as User & { uid: string }));
-        setUsers(data as any);
-      }, (error) => {
-        handleFirestoreError(error, OperationType.GET, 'users');
-      });
-    }
+    fetchData();
+
+    // Set up Realtime subscriptions
+    const studentsSub = supabase
+      .channel('students-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, fetchData)
+      .subscribe();
+
+    const attendanceSub = supabase
+      .channel('attendance-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, fetchData)
+      .subscribe();
 
     return () => {
-      unsubStudents();
-      unsubAttendance();
-      unsubSettings();
-      unsubUsers();
+      supabase.removeChannel(studentsSub);
+      supabase.removeChannel(attendanceSub);
     };
   }, [selectedDate, currentUser]);
 
@@ -424,21 +427,19 @@ export default function App() {
   const presentCount = currentStudents.filter(s => draftAttendance[s.studentId]?.status === 'Present').length;
   const absentCount = currentStudents.filter(s => draftAttendance[s.studentId]?.status === 'Absent').length;
 
-  // Add this state to check if system is initialized
   const [systemEmpty, setSystemEmpty] = useState(false);
 
   useEffect(() => {
     const checkInit = async () => {
       try {
-        const q = query(collection(db, 'users'), where('role', '==', 'Admin'));
-        const snapshot = await getDocs(q);
-        if (snapshot.empty) {
-          setSystemEmpty(true);
-        } else {
-          setSystemEmpty(false);
-        }
+        const { count, error } = await supabase
+          .from('users')
+          .select('*', { count: 'exact', head: true });
+        
+        if (error) throw error;
+        setSystemEmpty(count === 0);
       } catch (e: any) {
-        handleFirestoreError(e, OperationType.LIST, 'users');
+        console.error("Init check failed:", e.message);
       }
     };
     checkInit();
@@ -447,26 +448,54 @@ export default function App() {
   const initializeAdmin = async () => {
     try {
       const email = "admin@hostel.internal";
-      const userCredential = await createUserWithEmailAndPassword(auth, email, "admin123");
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password: 'admin123',
+      });
       
-      const newUser: User = { 
-        username: 'admin', 
-        name: 'Admin User', 
-        role: 'Admin' 
-      };
+      if (error) throw error;
+      
+      if (data.user) {
+        await supabase.from('users').insert({
+          id: data.user.id,
+          username: 'admin',
+          name: 'Admin User',
+          role: 'Admin'
+        });
+      }
 
-      await setDoc(doc(db, 'users', userCredential.user.uid), newUser);
-      
       alert("System Initialized! You can now login with admin / admin123");
       setSystemEmpty(false);
     } catch (err: any) {
-      if (err.code === 'auth/operation-not-allowed') {
-        alert("ভুল: Firebase Console এ 'Email/Password' অথেনটিকেশন এনাবল করা নেই। অনুগ্রহ করে Firebase কনসোল থেকে Authentication > Sign-in method এ গিয়ে Email/Password এনাবল করুন।");
-      } else {
-        handleFirestoreError(err, OperationType.WRITE, 'users');
-      }
+      alert("Initialization failed: " + err.message);
     }
   };
+
+  if (!isSupabaseConfigured) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
+        <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl p-10 text-center space-y-6">
+          <div className="w-20 h-20 bg-amber-100 rounded-full flex items-center justify-center mx-auto text-amber-600">
+            <Settings size={40} className="animate-spin-slow" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-2xl font-black text-slate-900">Supabase সেটআপ প্রয়োজন</h2>
+            <p className="text-slate-500 font-medium leading-relaxed">
+              আপনার অ্যাপটি চালানোর জন্য Supabase URL এবং API Key প্রয়োজন। দয়া করে সেটিংস মেনু থেকে এগুলো যোগ করুন।
+            </p>
+          </div>
+          <div className="bg-slate-50 p-4 rounded-2xl text-left border border-slate-100">
+            <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">কি কি যোগ করবেন?</p>
+            <div className="space-y-2">
+              <code className="block text-[10px] bg-white p-2 rounded border border-slate-200 font-mono">VITE_SUPABASE_URL</code>
+              <code className="block text-[10px] bg-white p-2 rounded border border-slate-200 font-mono">VITE_SUPABASE_ANON_KEY</code>
+            </div>
+          </div>
+          <p className="text-sm text-slate-400 font-bold">এগুলো যোগ করার পর পেজটি রিফ্রেশ দিন।</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!currentUser) {
     return (
@@ -585,49 +614,6 @@ export default function App() {
     );
   }
 
-  if (quotaExceeded) {
-    return (
-      <div className="min-h-screen bg-rose-50 flex items-center justify-center p-6 sm:p-10">
-        <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl overflow-hidden border border-rose-100">
-          <div className="bg-rose-600 p-8 text-white text-center">
-            <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 backdrop-blur-md">
-              <XCircle size={40} />
-            </div>
-            <h2 className="text-2xl font-black mb-2">কোটা শেষ হয়ে গেছে!</h2>
-            <p className="text-rose-100 text-sm font-bold uppercase tracking-widest">Quota Limit Exceeded</p>
-          </div>
-          <div className="p-8 space-y-6 text-center">
-            <p className="text-slate-600 font-medium leading-relaxed">
-              দুঃখিত, আজ এই প্রজেক্টের জন্য নির্ধারিত ফ্রি ব্যবহারের সীমা (Limit) শেষ হয়ে গেছে। 
-              এটি সাধারণত বড় প্রজেক্টের ক্ষেত্রে হয়ে থাকে যখন অনেক ভিজিটর বা ডাটা লোড হয়।
-            </p>
-            <div className="space-y-4">
-              <div className="bg-slate-50 p-4 rounded-2xl text-left space-y-2">
-                <p className="text-xs font-black text-slate-400 uppercase tracking-widest">কি করতে পারেন?</p>
-                <ul className="text-sm text-slate-700 space-y-2 font-bold">
-                  <li className="flex items-start gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 mt-1.5 shrink-0" />
-                    আগামীকাল পর্যন্ত অপেক্ষা করুন (কোটা প্রতিদিন রিসেট হয়)।
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 mt-1.5 shrink-0" />
-                    Firebase Console থেকে Billing এ গিয়ে 'Pay as you go' (Blaze) প্ল্যান নিয়ে লিমিট বাড়াতে পারেন।
-                  </li>
-                </ul>
-              </div>
-            </div>
-            <button 
-              onClick={() => window.location.reload()} 
-              className="w-full bg-slate-900 text-white py-4 rounded-xl font-black shadow-lg shadow-slate-900/10 hover:bg-slate-800 transition-all"
-            >
-              পুনরায় চেষ্টা করুন
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
@@ -678,14 +664,13 @@ export default function App() {
       alert("আপনার এই কাজটি করার অনুমতি নেই।");
       return;
     }
-    const records = (Object.entries(draftAttendance) as [string, { status: 'Present' | 'Absent', timestamp?: string }][]).map(([studentId, data]) => ({
-      studentId,
+    const records = Object.entries(draftAttendance).map(([studentId, data]) => ({
+      student_id: studentId,
       date: selectedDate,
-      mealType: selectedMeal,
-      status: data.status,
-      timestamp: data.timestamp,
-      recordedBy: currentUser?.username,
-      updatedAt: serverTimestamp()
+      meal_type: selectedMeal,
+      status: (data as any).status,
+      timestamp: (data as any).timestamp || new Date().toISOString(),
+      recorded_by: currentUser?.username
     }));
 
     if (records.length === 0) {
@@ -694,17 +679,16 @@ export default function App() {
     }
 
     try {
-      const batch = writeBatch(db);
-      records.forEach(record => {
-        // ID: date_meal_studentId
-        const id = `${record.date}_${record.mealType}_${record.studentId}`;
-        batch.set(doc(db, 'attendance', id), record);
-      });
-      await batch.commit();
+      const { error } = await supabase
+        .from('attendance')
+        .upsert(records, { onConflict: 'student_id,date,meal_type' });
+      
+      if (error) throw error;
+
       setIsEditMode(false);
       alert("হাজিরা সফলভাবে সাবমিট করা হয়েছে!");
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'batch/attendance');
+    } catch (error: any) {
+      alert("সাবমিট ব্যর্থ হয়েছে: " + error.message);
     }
   };
 
@@ -719,33 +703,32 @@ export default function App() {
       const firstSheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[firstSheetName];
       
-      // Convert to JSON
       const jsonData = XLSX.utils.sheet_to_json(worksheet);
       
-      const newStudents: Student[] = jsonData.map((row: any) => {
+      const newStudents = jsonData.map((row: any) => {
         const id = row.studentId || row.ID || row.id || row['Student ID'] || '';
         const name = row.name || row.Name || row['Student Name'] || '';
         const room = row.roomNumber || row.Room || row.room || row['Room No'] || '';
         const cls = row.className || row.Class || row.class || row['Class Name'] || '';
         
         return { 
-          studentId: String(id).trim(), 
+          student_id: String(id).trim(), 
           name: String(name).trim() || 'Unknown', 
-          roomNumber: String(room).trim() || 'None',
-          className: String(cls).trim() || 'General'
+          room_number: String(room).trim() || 'None',
+          class_name: String(cls).trim() || 'General'
         };
-      }).filter(s => s.studentId);
+      }).filter(s => s.student_id);
 
       if (newStudents.length > 0) {
         try {
-          const batch = writeBatch(db);
-          newStudents.forEach(s => {
-            batch.set(doc(db, 'students', s.studentId), s);
-          });
-          await batch.commit();
+          const { error } = await supabase
+            .from('students')
+            .upsert(newStudents);
+          
+          if (error) throw error;
           alert(`${newStudents.length} জন ছাত্রের ডাটা আপলোড সফল হয়েছে!`);
-        } catch (error) {
-          handleFirestoreError(error, OperationType.WRITE, 'batch/students');
+        } catch (error: any) {
+          alert("আপলোড ব্যর্থ হয়েছে: " + error.message);
         }
       }
     };
@@ -1635,10 +1618,14 @@ export default function App() {
                     <button 
                       onClick={async () => {
                         try {
-                          await setDoc(doc(db, 'settings', 'config'), settings);
+                          const { error } = await supabase
+                            .from('settings')
+                            .upsert({ key: 'config', value: settings });
+                          
+                          if (error) throw error;
                           alert("লোগো আপডেট সফল হয়েছে!");
                         } catch (err: any) {
-                          handleFirestoreError(err, OperationType.WRITE, 'settings/config');
+                          alert("আপডেট ব্যর্থ হয়েছে: " + err.message);
                         }
                       }}
                       className="bg-slate-900 text-white px-8 py-2 rounded-lg font-bold text-sm hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/10"
