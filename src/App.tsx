@@ -25,6 +25,26 @@ import {
   LineChart
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { 
+  collection, 
+  getDocs, 
+  setDoc, 
+  doc, 
+  query, 
+  where, 
+  onSnapshot, 
+  deleteDoc,
+  getDoc,
+  writeBatch,
+  serverTimestamp
+} from 'firebase/firestore';
+import { 
+  signInWithEmailAndPassword, 
+  signOut, 
+  onAuthStateChanged,
+  createUserWithEmailAndPassword
+} from 'firebase/auth';
+import { db, auth } from './lib/firebase';
 import { Student, AttendanceRecord, MealType, User, AppSettings } from './types';
 
 export default function App() {
@@ -51,68 +71,84 @@ export default function App() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: authForm.username, password: authForm.password })
-      });
-      if (res.ok) {
-        const user = await res.json();
-        setCurrentUser(user);
-        localStorage.setItem('hostel_user', JSON.stringify(user));
-        setIsLoading(true); // Trigger loading fresh data
+      // Using firebase-based login
+      // Mapping username to pseudo-email for Firebase Auth
+      const email = `${authForm.username.toLowerCase()}@hostel.internal`;
+      const userCredential = await signInWithEmailAndPassword(auth, email, authForm.password);
+      
+      // Get user details from Firestore
+      const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
+      if (userDoc.exists()) {
+        const userData = userDoc.data() as User;
+        setCurrentUser(userData);
+        localStorage.setItem('hostel_user', JSON.stringify(userData));
       } else {
-        alert("ভুল ইউজারনেম বা পাসওয়ার্ড!");
+        // Fallback or legacy check (if user exists in auth but not in firestore)
+        alert("User record not found in database.");
       }
-    } catch (err) {
-      alert("লগইন ব্যর্থ হয়েছে।");
+    } catch (err: any) {
+      console.error(err);
+      alert("ভুল ইউজারনেম বা পাসওয়ার্ড!");
     }
   };
 
   const handleRegister = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     try {
-      const res = await fetch('/api/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(authForm)
-      });
-      if (res.ok) {
-        alert("ইউজার তৈরি সফল!");
-        setAuthForm({ username: '', password: '', name: '', role: 'Staff' });
-        fetch('/api/users').then(r => r.json()).then(setUsers);
-      } else {
-        const data = await res.json();
-        alert(data.error || "ব্যর্থ হয়েছে!");
-      }
-    } catch (err) {
-      alert("ব্যর্থ হয়েছে!");
+      const email = `${authForm.username.toLowerCase()}@hostel.internal`;
+      const userCredential = await createUserWithEmailAndPassword(auth, email, authForm.password);
+      
+      const newUser: User = { 
+        username: authForm.username, 
+        name: authForm.name, 
+        role: authForm.role || 'Staff' 
+      };
+
+      await setDoc(doc(db, 'users', userCredential.user.uid), newUser);
+      
+      alert("ইউজার তৈরি সফল!");
+      setAuthForm({ username: '', password: '', name: '', role: 'Staff' });
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "ব্যর্থ হয়েছে!");
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await signOut(auth);
     setCurrentUser(null);
     localStorage.removeItem('hostel_user');
   };
 
-  const handleDeleteUser = async (username: string) => {
-    if (username === currentUser?.username) {
-      alert("আপনি নিজেকে ডিলিট করতে পারবেন না!");
-      return;
-    }
-    if (!confirm("Are you sure you want to delete this user?")) return;
+  const handleDeleteUser = async (uid: string) => {
+    if (!confirm("Are you sure you want to delete this user? (Auth record must be deleted manually in Firebase Console)")) return;
     try {
-      const res = await fetch(`/api/users/${username}`, { method: 'DELETE' });
-      if (res.ok) {
-        setUsers(users.filter(u => u.username !== username));
-        alert("ইউজার ডিলিট সফল!");
-      }
+      await deleteDoc(doc(db, 'users', uid));
+      alert("ইউজার ডাটা ডিলিট সফল!");
     } catch (err) {
       alert("ডিলিট ব্যর্থ হয়েছে।");
     }
   };
 
-  // Load initial data
+  // Load initial data and Sync with Firebase
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data() as User;
+          setCurrentUser(userData);
+          localStorage.setItem('hostel_user', JSON.stringify(userData));
+        }
+      } else {
+        setCurrentUser(null);
+        localStorage.removeItem('hostel_user');
+      }
+    });
+
+    return () => unsubscribeAuth();
+  }, []);
+
   useEffect(() => {
     if (!currentUser) {
       setIsLoading(false);
@@ -121,37 +157,42 @@ export default function App() {
     
     setIsLoading(true);
     
-    const loadData = async () => {
-      try {
-        const [studentsRes, attendanceRes, settingsRes] = await Promise.all([
-          fetch('/api/students'),
-          fetch(`/api/attendance?date=${selectedDate}`),
-          fetch('/api/settings')
-        ]);
-        
-        const studentsData = await studentsRes.json();
-        const attendanceData = await attendanceRes.json();
-        const settingsData = await settingsRes.json();
-        
-        setStudents(studentsData);
-        setAttendance(attendanceData);
-        setSettings(settingsData);
-        setDraftAttendance({});
-        setIsEditMode(false);
+    // Students listener
+    const unsubStudents = onSnapshot(collection(db, 'students'), (snapshot) => {
+      const data = snapshot.docs.map(d => d.data() as Student);
+      setStudents(data);
+    });
 
-        if (currentUser.role === 'Admin') {
-          const usersRes = await fetch('/api/users');
-          const usersData = await usersRes.json();
-          setUsers(usersData);
-        }
-      } catch (err) {
-        console.error("Data load failed", err);
-      } finally {
-        setIsLoading(false);
+    // Attendance listener for selected date
+    const attendanceQuery = query(collection(db, 'attendance'), where('date', '==', selectedDate));
+    const unsubAttendance = onSnapshot(attendanceQuery, (snapshot) => {
+      const data = snapshot.docs.map(d => d.data() as AttendanceRecord);
+      setAttendance(data);
+      setIsLoading(false);
+    });
+
+    // Settings listener
+    const unsubSettings = onSnapshot(doc(db, 'settings', 'config'), (doc) => {
+      if (doc.exists()) {
+        setSettings(doc.data() as AppSettings);
       }
-    };
+    });
 
-    loadData();
+    // Users listener (Admin only)
+    let unsubUsers = () => {};
+    if (currentUser.role === 'Admin') {
+      unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+        const data = snapshot.docs.map(d => ({ ...d.data(), uid: d.id } as User & { uid: string }));
+        setUsers(data as any);
+      });
+    }
+
+    return () => {
+      unsubStudents();
+      unsubAttendance();
+      unsubSettings();
+      unsubUsers();
+    };
   }, [selectedDate, currentUser]);
 
   // Sync draft from existing attendance when switching meal
@@ -231,6 +272,47 @@ export default function App() {
   const presentCount = currentStudents.filter(s => draftAttendance[s.studentId]?.status === 'Present').length;
   const absentCount = currentStudents.filter(s => draftAttendance[s.studentId]?.status === 'Absent').length;
 
+  // Add this state to check if system is initialized
+  const [systemEmpty, setSystemEmpty] = useState(false);
+
+  useEffect(() => {
+    const checkInit = async () => {
+      try {
+        const q = query(collection(db, 'users'), where('role', '==', 'Admin'));
+        const snapshot = await getDocs(q);
+        if (snapshot.empty) {
+          setSystemEmpty(true);
+        } else {
+          setSystemEmpty(false);
+        }
+      } catch (e) {
+        console.error("Check init failed", e);
+      }
+    };
+    checkInit();
+  }, []);
+
+  const initializeAdmin = async () => {
+    try {
+      const email = "admin@hostel.internal";
+      const userCredential = await createUserWithEmailAndPassword(auth, email, "1234");
+      
+      const newUser: User = { 
+        username: 'admin', 
+        name: 'Admin User', 
+        role: 'Admin' 
+      };
+
+      await setDoc(doc(db, 'users', userCredential.user.uid), newUser);
+      
+      alert("System Initialized! You can now login with admin / 1234");
+      setSystemEmpty(false);
+    } catch (err: any) {
+      console.error(err);
+      alert("Initialization failed: " + err.message);
+    }
+  };
+
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-indigo-900 flex items-center justify-center p-4">
@@ -268,33 +350,49 @@ export default function App() {
               <p className="text-sm font-medium text-slate-400">আপনার একাউন্টে লগইন করুন</p>
             </div>
 
-            <form onSubmit={handleLogin} className="space-y-6">
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] block ml-1">ইউজারনেম (Username)</label>
-                <input 
-                  required
-                  type="text" 
-                  value={authForm.username}
-                  onChange={(e) => setAuthForm(prev => ({ ...prev, username: e.target.value }))}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-5 py-4 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all font-bold text-slate-700"
-                  placeholder="আপনার আইডি দিন"
-                />
+            {systemEmpty ? (
+              <div className="space-y-4">
+                <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl">
+                  <p className="text-xs text-amber-800 font-bold leading-relaxed">
+                    সিস্টেমটি এখনো সক্রিয় করা হয়নি। প্রথমবার ব্যবহারের জন্য এডমিন একাউন্ট তৈরি করুন।
+                  </p>
+                </div>
+                <button 
+                  onClick={initializeAdmin}
+                  className="w-full bg-emerald-600 text-white py-4 rounded-xl font-black shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-all"
+                >
+                  সিস্টেম সক্রিয় করুন (Init Admin)
+                </button>
               </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] block ml-1">পাসওয়ার্ড (Password)</label>
-                <input 
-                  required
-                  type="password" 
-                  value={authForm.password}
-                  onChange={(e) => setAuthForm(prev => ({ ...prev, password: e.target.value }))}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-5 py-4 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all font-bold text-slate-700"
-                  placeholder="আপনার পাসওয়ার্ড"
-                />
-              </div>
-              <button className="w-full bg-indigo-600 text-white py-5 rounded-xl font-black shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 hover:scale-[1.02] active:scale-95 transition-all">
-                লগইন করুন
-              </button>
-            </form>
+            ) : (
+              <form onSubmit={handleLogin} className="space-y-6">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] block ml-1">ইউজারনেম (Username)</label>
+                  <input 
+                    required
+                    type="text" 
+                    value={authForm.username}
+                    onChange={(e) => setAuthForm(prev => ({ ...prev, username: e.target.value }))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-5 py-4 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all font-bold text-slate-700"
+                    placeholder="আপনার আইডি দিন"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] block ml-1">পাসওয়ার্ড (Password)</label>
+                  <input 
+                    required
+                    type="password" 
+                    value={authForm.password}
+                    onChange={(e) => setAuthForm(prev => ({ ...prev, password: e.target.value }))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-5 py-4 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all font-bold text-slate-700"
+                    placeholder="আপনার পাসওয়ার্ড"
+                  />
+                </div>
+                <button className="w-full bg-indigo-600 text-white py-5 rounded-xl font-black shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 hover:scale-[1.02] active:scale-95 transition-all">
+                  লগইন করুন
+                </button>
+              </form>
+            )}
           </div>
         </motion.div>
       </div>
@@ -333,13 +431,14 @@ export default function App() {
   };
 
   const handleSubmitAttendance = async () => {
-    const records: AttendanceRecord[] = (Object.entries(draftAttendance) as [string, { status: 'Present' | 'Absent', timestamp?: string }][]).map(([studentId, data]) => ({
+    const records = (Object.entries(draftAttendance) as [string, { status: 'Present' | 'Absent', timestamp?: string }][]).map(([studentId, data]) => ({
       studentId,
       date: selectedDate,
       mealType: selectedMeal,
       status: data.status,
       timestamp: data.timestamp,
-      recordedBy: currentUser?.username
+      recordedBy: currentUser?.username,
+      updatedAt: serverTimestamp()
     }));
 
     if (records.length === 0) {
@@ -348,26 +447,22 @@ export default function App() {
     }
 
     try {
-      const res = await fetch('/api/attendance', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ records })
+      const batch = writeBatch(db);
+      records.forEach(record => {
+        // ID: date_meal_studentId
+        const id = `${record.date}_${record.mealType}_${record.studentId}`;
+        batch.set(doc(db, 'attendance', id), record);
       });
-      if (res.ok) {
-        // Refresh underlying attendance
-        const refreshRes = await fetch(`/api/attendance?date=${selectedDate}`);
-        const freshData = await refreshRes.json();
-        setAttendance(freshData);
-        setIsEditMode(false);
-        alert("হাজিরা সফলভাবে সাবমিট করা হয়েছে!");
-      }
+      await batch.commit();
+      setIsEditMode(false);
+      alert("হাজিরা সফলভাবে সাবমিট করা হয়েছে!");
     } catch (error) {
       console.error("Failed to submit attendance", error);
       alert("সাবমিট ব্যর্থ হয়েছে।");
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -382,7 +477,6 @@ export default function App() {
       const jsonData = XLSX.utils.sheet_to_json(worksheet);
       
       const newStudents: Student[] = jsonData.map((row: any) => {
-        // Try to find columns by common names (case-insensitive)
         const id = row.studentId || row.ID || row.id || row['Student ID'] || '';
         const name = row.name || row.Name || row['Student Name'] || '';
         const room = row.roomNumber || row.Room || row.room || row['Room No'] || '';
@@ -398,12 +492,11 @@ export default function App() {
 
       if (newStudents.length > 0) {
         try {
-          await fetch('/api/students', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ students: newStudents })
+          const batch = writeBatch(db);
+          newStudents.forEach(s => {
+            batch.set(doc(db, 'students', s.studentId), s);
           });
-          setStudents(newStudents);
+          await batch.commit();
           alert(`${newStudents.length} জন ছাত্রের ডাটা আপলোড সফল হয়েছে!`);
         } catch (error) {
           console.error("Upload failed", error);
@@ -753,13 +846,7 @@ export default function App() {
                     </div>
 
                     <button 
-                      onClick={async () => {
-                        setIsLoading(true);
-                        const res = await fetch(`/api/attendance?date=${selectedDate}`);
-                        const data = await res.json();
-                        setAttendance(data);
-                        setIsLoading(false);
-                      }}
+                      onClick={() => setIsEditMode(true)}
                       className="bg-white border border-slate-200 text-slate-600 px-3 lg:px-4 py-2.5 lg:py-2 rounded-lg font-bold text-xs lg:text-sm hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
                       title="রিফ্রেশ করুন"
                     >
@@ -1133,14 +1220,8 @@ export default function App() {
                     <button 
                       onClick={async () => {
                         try {
-                          const res = await fetch('/api/settings', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(settings)
-                          });
-                          if (res.ok) {
-                            alert("লোগো আপডেট সফল হয়েছে!");
-                          }
+                          await setDoc(doc(db, 'settings', 'config'), settings);
+                          alert("লোগো আপডেট সফল হয়েছে!");
                         } catch (err) {
                           alert("আপডেট ব্যর্থ হয়েছে।");
                         }
@@ -1175,9 +1256,9 @@ export default function App() {
                             </span>
                           </td>
                           <td className="px-8 py-4 text-right">
-                            {u.username !== currentUser.username && (
+                            {(u as any).uid !== (currentUser as any).uid && (
                               <button 
-                                onClick={() => handleDeleteUser(u.username)}
+                                onClick={() => handleDeleteUser((u as any).uid)}
                                 className="text-rose-500 hover:text-rose-700 font-bold p-2 transition-colors"
                                 title="ডিলিট করুন"
                               >
