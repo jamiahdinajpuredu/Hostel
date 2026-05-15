@@ -37,6 +37,10 @@ service cloud.firestore {
              data.status in ['Present', 'Absent'];
     }
 
+    function isValidSettings(data) {
+      return data.logoUrl is string && data.logoUrl.size() <= 1048576;
+    }
+
     function isAdmin() {
       return isSignedIn() && (
         request.auth.token.email == 'jamiahdinajpur.edu@gmail.com' ||
@@ -80,7 +84,7 @@ service cloud.firestore {
     // Settings collection
     match /settings/config {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isAdmin() && isValidSettings(incoming());
     }
   }
 }

@@ -1282,6 +1282,10 @@ export default function App() {
                             onChange={(e) => {
                               const file = e.target.files?.[0];
                               if (file) {
+                                if (file.size > 800000) { // Limit to ~800KB to allow for base64 overhead
+                                  alert("ইমেজ ফাইলটি অনেক বড় (৮০০ কেবি এর বেশি)। দয়া করে ছোট সাইজের ইমেজ ব্যবহার করুন অথবা ইমেজের লিঙ্ক দিন।");
+                                  return;
+                                }
                                 const reader = new FileReader();
                                 reader.onloadend = () => {
                                   setSettings(prev => ({ ...prev, logoUrl: reader.result as string }));
@@ -1298,8 +1302,9 @@ export default function App() {
                         try {
                           await setDoc(doc(db, 'settings', 'config'), settings);
                           alert("লোগো আপডেট সফল হয়েছে!");
-                        } catch (err) {
-                          alert("আপডেট ব্যর্থ হয়েছে।");
+                        } catch (err: any) {
+                          console.error(err);
+                          alert("আপডেট ব্যর্থ হয়েছে: " + err.message);
                         }
                       }}
                       className="bg-slate-900 text-white px-8 py-2 rounded-lg font-bold text-sm hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/10"
