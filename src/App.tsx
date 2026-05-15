@@ -213,6 +213,11 @@ export default function App() {
     }
   };
 
+  // Sorted students for database view
+  const sortedStudents = useMemo(() => {
+    return [...students].sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true }));
+  }, [students]);
+
   // Load initial data and Sync with Firebase
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
@@ -314,7 +319,7 @@ export default function App() {
       }
     });
 
-    const allRoomEntries = Object.entries(roomStats).sort(([a], [b]) => a.localeCompare(b));
+    const allRoomEntries = Object.entries(roomStats).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
     
     // Global summary stays global
     const totalPresent = allRoomEntries.reduce((sum, [, r]) => sum + r.present, 0);
@@ -355,7 +360,7 @@ export default function App() {
   }, [students, searchQuery, roomFilter]);
 
   const rooms = useMemo(() => {
-    const r = Array.from(new Set(students.map(s => s.roomNumber))).sort();
+    const r = (Array.from(new Set(students.map(s => s.roomNumber))) as string[]).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     return ['All', ...r];
   }, [students]);
 
@@ -1197,7 +1202,7 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {students.map(s => (
+                        {sortedStudents.map(s => (
                           <tr key={s.studentId} className="hover:bg-slate-50 transition-colors">
                             <td className="px-8 py-4 font-mono font-bold text-indigo-600">{s.studentId}</td>
                             <td className="px-8 py-4 font-bold">{s.name}</td>
@@ -1242,32 +1247,53 @@ export default function App() {
                          type="date" 
                          value={selectedDate}
                          onChange={(e) => setSelectedDate(e.target.value)}
-                         className="w-full lg:w-auto bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 font-mono text-sm"
+                         className="w-full lg:w-48 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-indigo-500/20"
                        />
                     </div>
+
+                    <div className="space-y-1">
+                       <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">রুম সিলেক্ট (Select Room)</h3>
+                       <select 
+                         value={roomFilter}
+                         onChange={(e) => setRoomFilter(e.target.value)}
+                         className="w-full lg:w-48 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20"
+                       >
+                         {rooms.map(room => (
+                           <option key={room} value={room}>{room === 'All' ? 'সব রুম' : `রুম ${room}`}</option>
+                         ))}
+                       </select>
+                    </div>
+
                     <div className="flex-1">
                       <h2 className="text-lg lg:text-xl font-bold">সারসংক্ষেপ রিপোর্ট</h2>
-                      <p className="text-xs lg:text-sm text-slate-500">তারিখ অনুযায়ী হাজিরা স্ট্যাটাস</p>
+                      <p className="text-xs lg:text-sm text-slate-500">তারিখ ও রুম অনুযায়ী হাজিরা স্ট্যাটাস</p>
                     </div>
                     <button 
                       onClick={() => {
-                        const report = students.map(s => {
-                          const record = attendance.find(a => a.studentId === s.studentId && a.mealType === selectedMeal);
+                        const reportStudents = students.filter(s => roomFilter === 'All' || s.roomNumber === roomFilter);
+                        const report = reportStudents.map(s => {
+                          const meals = ['Breakfast', 'Lunch', 'Dinner'] as MealType[];
+                          const mealData: any = {};
+                          meals.forEach(mt => {
+                            const record = attendance.find(a => a.studentId === s.studentId && a.mealType === mt);
+                            mealData[`${mt} Status`] = record ? (record.status === 'Present' ? 'উপস্থিত' : 'অনুপস্থিত') : '-';
+                            mealData[`${mt} Time`] = record?.timestamp || '-';
+                            mealData[`${mt} By`] = record?.recordedBy || '-';
+                          });
+
                           return {
                             'Student ID': s.studentId,
                             'Name': s.name,
                             'Class': s.className,
                             'Room': s.roomNumber,
-                            'Meal Type': selectedMeal,
-                            'Status': record?.status || 'Not Recorded',
-                            'Time': record?.timestamp || '-',
+                            ...mealData,
                             'Date': selectedDate
                           };
                         });
                         const ws = XLSX.utils.json_to_sheet(report);
                         const wb = XLSX.utils.book_new();
                         XLSX.utils.book_append_sheet(wb, ws, "Attendance Report");
-                        XLSX.writeFile(wb, `Report_${selectedDate}.xlsx`);
+                        XLSX.writeFile(wb, `Report_${selectedDate}_Room_${roomFilter}.xlsx`);
                       }}
                       className="bg-emerald-600 text-white px-6 py-2.5 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20"
                     >
@@ -1290,7 +1316,7 @@ export default function App() {
                           </tr>
                         </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {students.map(s => {
+                        {sortedStudents.filter(s => roomFilter === 'All' || s.roomNumber === roomFilter).map(s => {
                           const getRecord = (mt: MealType) => attendance.find(a => a.studentId === s.studentId && a.mealType === mt);
                           return (
                             <tr key={s.studentId} className="hover:bg-slate-50 transition-colors">
@@ -1300,24 +1326,32 @@ export default function App() {
                                 <div className="text-[10px] text-slate-400 font-bold">Class {s.className}</div>
                               </td>
                               <td className="px-8 py-4 text-slate-500">{s.roomNumber}</td>
-                              <td className="px-8 py-4 text-center">
-                                <div className="flex flex-col items-center gap-1">
-                                  {getRecord('Breakfast')?.status === 'Present' ? <div className="w-2 h-2 rounded-full bg-emerald-500" /> : getRecord('Breakfast')?.status === 'Absent' ? <div className="w-2 h-2 rounded-full bg-rose-500" /> : '-'}
-                                  {getRecord('Breakfast')?.timestamp && <span className="text-[9px] text-slate-400 font-mono italic">{getRecord('Breakfast')?.timestamp}</span>}
-                                </div>
-                              </td>
-                              <td className="px-8 py-4 text-center">
-                                <div className="flex flex-col items-center gap-1">
-                                  {getRecord('Lunch')?.status === 'Present' ? <div className="w-2 h-2 rounded-full bg-emerald-500" /> : getRecord('Lunch')?.status === 'Absent' ? <div className="w-2 h-2 rounded-full bg-rose-500" /> : '-'}
-                                  {getRecord('Lunch')?.timestamp && <span className="text-[9px] text-slate-400 font-mono italic">{getRecord('Lunch')?.timestamp}</span>}
-                                </div>
-                              </td>
-                              <td className="px-8 py-4 text-center">
-                                <div className="flex flex-col items-center gap-1">
-                                  {getRecord('Dinner')?.status === 'Present' ? <div className="w-2 h-2 rounded-full bg-emerald-500" /> : getRecord('Dinner')?.status === 'Absent' ? <div className="w-2 h-2 rounded-full bg-rose-500" /> : '-'}
-                                  {getRecord('Dinner')?.timestamp && <span className="text-[9px] text-slate-400 font-mono italic">{getRecord('Dinner')?.timestamp}</span>}
-                                </div>
-                              </td>
+                              {[ 'Breakfast', 'Lunch', 'Dinner' ].map((mt) => {
+                                const rec = getRecord(mt as MealType);
+                                return (
+                                  <td key={mt} className="px-4 lg:px-8 py-4 text-center">
+                                    <div className="flex flex-col items-center gap-1">
+                                      {rec ? (
+                                        <>
+                                          <span className={`px-2 py-0.5 rounded text-[8px] lg:text-[9px] font-black uppercase tracking-widest ${rec.status === 'Present' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+                                            {rec.status === 'Present' ? 'উপস্থিত' : 'অনুপস্থিত'}
+                                          </span>
+                                          <div className="text-[8px] lg:text-[9px] text-slate-400 font-mono leading-tight">
+                                            {rec.timestamp}
+                                          </div>
+                                          {rec.recordedBy && (
+                                            <div className="text-[8px] lg:text-[9px] text-indigo-400 font-medium">
+                                              By: {rec.recordedBy}
+                                            </div>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <span className="text-slate-300 text-xs">-</span>
+                                      )}
+                                    </div>
+                                  </td>
+                                );
+                              })}
                             </tr>
                           )
                         })}
