@@ -82,6 +82,7 @@ export default function App() {
         const userData = userDoc.data() as User;
         setCurrentUser(userData);
         localStorage.setItem('hostel_user', JSON.stringify(userData));
+        setView('dashboard');
       } else if (result.user.email === 'jamiahdinajpur.edu@gmail.com') {
         const newUser: User = { 
           username: 'admin', 
@@ -118,6 +119,7 @@ export default function App() {
         const userData = userDoc.data() as User;
         setCurrentUser(userData);
         localStorage.setItem('hostel_user', JSON.stringify(userData));
+        setView('dashboard');
       } else {
         // Fallback or legacy check (if user exists in auth but not in firestore)
         alert("User record not found in database.");
@@ -501,7 +503,13 @@ export default function App() {
     );
   }
 
+  const canRecordAttendance = currentUser?.role === 'Admin' || currentUser?.role === 'Staff';
+
   const handleStatusChange = (studentId: string, status: 'Present' | 'Absent') => {
+    if (!canRecordAttendance) {
+      alert("আপনার এই কাজটি করার অনুমতি নেই।");
+      return;
+    }
     if (!isEditMode) {
       alert("পরিবর্তন করতে প্রথমে 'আপডেট হাজিরা' বাটনে ক্লিক করুন।");
       return;
@@ -516,6 +524,10 @@ export default function App() {
   };
 
   const handleSubmitAttendance = async () => {
+    if (!canRecordAttendance) {
+      alert("আপনার এই কাজটি করার অনুমতি নেই।");
+      return;
+    }
     const records = (Object.entries(draftAttendance) as [string, { status: 'Present' | 'Absent', timestamp?: string }][]).map(([studentId, data]) => ({
       studentId,
       date: selectedDate,
@@ -925,45 +937,49 @@ export default function App() {
                     </div>
                   </div>
                   
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
-                    <div className="relative flex-1 sm:w-48">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 opacity-30 text-slate-600" size={14} />
-                      <input 
-                        type="text" 
-                        placeholder="খুঁজুন..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full bg-white border border-slate-200 rounded-full pl-9 pr-4 py-2 lg:py-1.5 text-xs lg:text-sm focus:ring-2 focus:ring-indigo-500/20 transition-all outline-none"
-                      />
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+                      <div className="relative flex-1 sm:w-48">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 opacity-30 text-slate-600" size={14} />
+                        <input 
+                          type="text" 
+                          placeholder="খুঁজুন..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded-full pl-9 pr-4 py-2 lg:py-1.5 text-xs lg:text-sm focus:ring-2 focus:ring-indigo-500/20 transition-all outline-none"
+                        />
+                      </div>
+
+                      {canRecordAttendance && (
+                        <>
+                          <button 
+                            onClick={() => setIsEditMode(true)}
+                            className="bg-white border border-slate-200 text-slate-600 px-3 lg:px-4 py-2.5 lg:py-2 rounded-lg font-bold text-xs lg:text-sm hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
+                            title="রিফ্রেশ করুন"
+                          >
+                            <LineChart size={16} className="text-indigo-400" />
+                            রিফ্রেশ
+                          </button>
+
+                          {isEditMode ? (
+                            <button 
+                              onClick={handleSubmitAttendance}
+                              className="bg-emerald-600 text-white px-4 lg:px-6 py-2.5 lg:py-2 rounded-lg font-bold text-xs lg:text-sm shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-all flex items-center justify-center gap-2"
+                            >
+                              <CheckCircle2 size={16} />
+                              সাবমিট করুন
+                            </button>
+                          ) : (
+                            <button 
+                              onClick={() => setIsEditMode(true)}
+                              className="bg-indigo-600 text-white px-4 lg:px-6 py-2.5 lg:py-2 rounded-lg font-bold text-xs lg:text-sm shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
+                            >
+                              <FileText size={16} />
+                              আপডেট হাজিরা
+                            </button>
+                          )}
+                        </>
+                      )}
                     </div>
-
-                    <button 
-                      onClick={() => setIsEditMode(true)}
-                      className="bg-white border border-slate-200 text-slate-600 px-3 lg:px-4 py-2.5 lg:py-2 rounded-lg font-bold text-xs lg:text-sm hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
-                      title="রিফ্রেশ করুন"
-                    >
-                      <LineChart size={16} className="text-indigo-400" />
-                      রিফ্রেশ
-                    </button>
-
-                    {isEditMode ? (
-                      <button 
-                        onClick={handleSubmitAttendance}
-                        className="bg-emerald-600 text-white px-4 lg:px-6 py-2.5 lg:py-2 rounded-lg font-bold text-xs lg:text-sm shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-all flex items-center justify-center gap-2"
-                      >
-                        <CheckCircle2 size={16} />
-                        সাবমিট করুন
-                      </button>
-                    ) : (
-                      <button 
-                        onClick={() => setIsEditMode(true)}
-                        className="bg-indigo-600 text-white px-4 lg:px-6 py-2.5 lg:py-2 rounded-lg font-bold text-xs lg:text-sm shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
-                      >
-                        <FileText size={16} />
-                        আপডেট হাজিরা
-                      </button>
-                    )}
-                  </div>
                 </div>
 
                 {/* Table Content */}
