@@ -445,7 +445,7 @@ export default function App() {
                   <span>D</span>
                 )}
               </div>
-              <h1 className="text-3xl font-black tracking-tight mb-2">ডাইনিং রুম</h1>
+              <h1 className="text-3xl font-black tracking-tight mb-2">বোডিং রুম</h1>
               <p className="text-[10px] text-indigo-300 uppercase font-black tracking-[0.3em] opacity-80">Institutional Entry System</p>
             </div>
           </div>
@@ -666,7 +666,7 @@ export default function App() {
               )}
             </div>
             <div>
-              <h1 className="text-base lg:text-xl font-black tracking-tight leading-none mb-1">আল-জামি‘আহ আস-সালাফিয়্যাহ, দিনাজপুর ডাইনিং ম্যানেজমেন্ট</h1>
+              <h1 className="text-base lg:text-xl font-black tracking-tight leading-none mb-1">আল-জামি‘আহ আস-সালাফিয়্যাহ, দিনাজপুর বোডিং ম্যানেজমেন্ট</h1>
               <div className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 <p className="text-[9px] lg:text-[10px] text-indigo-200 uppercase font-bold tracking-widest leading-none">Dining Control Center</p>
@@ -1114,7 +1114,7 @@ export default function App() {
                       অনুপস্থিত: <span className="text-rose-600 font-black">{absentCount}</span>
                     </span>
                   </div>
-                  <p className="text-[8px] lg:text-[10px] uppercase tracking-widest font-black text-slate-400">© ২০২৪ ডাইনিং ম্যানেজমেন্ট সিস্টেম</p>
+                  <p className="text-[8px] lg:text-[10px] uppercase tracking-widest font-black text-slate-400">© ২০২৬ ডাইনিং ম্যানেজমেন্ট সিস্টেম</p>
                 </div>
               </motion.div>
             )}
