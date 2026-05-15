@@ -62,9 +62,9 @@ service cloud.firestore {
 
     // Users collection
     match /users/{userId} {
-      allow read: if true;
-      // Allow creation of the first admin account with the specific bootstrap email
-      allow write: if isAdmin() || (isSignedIn() && request.auth.token.email == 'admin@hostel.internal' && incoming().role == 'Admin');
+      allow get, list: if true;
+      // Allow creation of any admin if signed in with the bootstrap email
+      allow write: if isAdmin() || (isSignedIn() && (request.auth.token.email == 'admin@hostel.internal' || request.auth.token.email == 'jamiahdinajpur.edu@gmail.com'));
     }
 
     // Settings collection

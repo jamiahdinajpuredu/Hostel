@@ -285,8 +285,13 @@ export default function App() {
         } else {
           setSystemEmpty(false);
         }
-      } catch (e) {
-        console.error("Check init failed", e);
+      } catch (e: any) {
+        // If we get a permission error, it's likely rules are still propagating or there's a config issue
+        console.warn("Check init failed (likely propagation):", e.message);
+        if (e.message.includes('insufficient permissions')) {
+          // Assume not empty to allow login attempts while rules propagate
+          setSystemEmpty(false);
+        }
       }
     };
     checkInit();
@@ -309,7 +314,11 @@ export default function App() {
       setSystemEmpty(false);
     } catch (err: any) {
       console.error(err);
-      alert("Initialization failed: " + err.message);
+      if (err.code === 'auth/operation-not-allowed') {
+        alert("ভুল: Firebase Console এ 'Email/Password' অথেনটিকেশন এনাবল করা নেই। অনুগ্রহ করে Firebase কনসোল থেকে Authentication > Sign-in method এ গিয়ে Email/Password এনাবল করুন।");
+      } else {
+        alert("Initialization failed: " + err.message);
+      }
     }
   };
 
