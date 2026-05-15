@@ -64,6 +64,7 @@ export default function App() {
   const [selectedMeal, setSelectedMeal] = useState<MealType>('Lunch');
   const [searchQuery, setSearchQuery] = useState('');
   const [roomFilter, setRoomFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState<'All' | 'Present' | 'Absent'>('All');
   const [isEditMode, setIsEditMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -217,6 +218,25 @@ export default function App() {
   const sortedStudents = useMemo(() => {
     return [...students].sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true }));
   }, [students]);
+
+  const reportStats = useMemo(() => {
+    const reportStudents = students.filter(s => roomFilter === 'All' || s.roomNumber === roomFilter);
+    const stats: Record<MealType, { present: number, absent: number }> = {
+      Breakfast: { present: 0, absent: 0 },
+      Lunch: { present: 0, absent: 0 },
+      Dinner: { present: 0, absent: 0 }
+    };
+
+    reportStudents.forEach(s => {
+      (['Breakfast', 'Lunch', 'Dinner'] as MealType[]).forEach(mt => {
+        const record = attendance.find(a => a.studentId === s.studentId && a.mealType === mt);
+        if (record?.status === 'Present') stats[mt].present++;
+        else if (record?.status === 'Absent') stats[mt].absent++;
+      });
+    });
+
+    return stats;
+  }, [students, attendance, roomFilter]);
 
   // Load initial data and Sync with Firebase
   useEffect(() => {
@@ -1240,23 +1260,23 @@ export default function App() {
                 exit={{ opacity: 0, scale: 0.98 }}
                 className="flex flex-col h-full space-y-4 lg:space-y-6"
               >
-                 <div className="bg-white p-4 lg:p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col lg:flex-row gap-4 lg:gap-6 lg:items-end shrink-0">
+                 <div className="bg-white p-4 lg:p-6 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4 lg:gap-6 items-end shrink-0">
                     <div className="space-y-1">
                        <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">রিপোর্ট তারিখ</h3>
                        <input 
                          type="date" 
                          value={selectedDate}
                          onChange={(e) => setSelectedDate(e.target.value)}
-                         className="w-full lg:w-48 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-indigo-500/20"
+                         className="w-full lg:w-40 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-indigo-500/20"
                        />
                     </div>
 
                     <div className="space-y-1">
-                       <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">রুম সিলেক্ট (Select Room)</h3>
+                       <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">রুম (Room)</h3>
                        <select 
                          value={roomFilter}
                          onChange={(e) => setRoomFilter(e.target.value)}
-                         className="w-full lg:w-48 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20"
+                         className="w-full lg:w-32 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20"
                        >
                          {rooms.map(room => (
                            <option key={room} value={room}>{room === 'All' ? 'সব রুম' : `রুম ${room}`}</option>
@@ -1264,13 +1284,42 @@ export default function App() {
                        </select>
                     </div>
 
-                    <div className="flex-1">
-                      <h2 className="text-lg lg:text-xl font-bold">সারসংক্ষেপ রিপোর্ট</h2>
-                      <p className="text-xs lg:text-sm text-slate-500">তারিখ ও রুম অনুযায়ী হাজিরা স্ট্যাটাস</p>
+                    <div className="space-y-1">
+                       <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">স্ট্যাটাস ফিল্টার</h3>
+                       <select 
+                         value={statusFilter}
+                         onChange={(e) => setStatusFilter(e.target.value as any)}
+                         className="w-full lg:w-32 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20"
+                       >
+                         <option value="All">সবাই</option>
+                         <option value="Present">উপস্থিত</option>
+                         <option value="Absent">অনুপস্থিত</option>
+                       </select>
                     </div>
+
+                    <div className="relative flex-1 min-w-[150px]">
+                      <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">সার্চ</h3>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 opacity-30 text-slate-600" size={14} />
+                        <input 
+                          type="text" 
+                          placeholder="নাম বা আইডি দিয়ে খুঁজুন..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-4 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500/20"
+                        />
+                      </div>
+                    </div>
+
                     <button 
                       onClick={() => {
-                        const reportStudents = students.filter(s => roomFilter === 'All' || s.roomNumber === roomFilter);
+                        const reportStudents = students.filter(s => {
+                          const matchesRoom = roomFilter === 'All' || s.roomNumber === roomFilter;
+                          const matchesSearch = s.name.toLowerCase().includes(searchQuery.toLowerCase()) || s.studentId.includes(searchQuery);
+                          const record = attendance.find(a => a.studentId === s.studentId && a.mealType === selectedMeal);
+                          const matchesStatus = statusFilter === 'All' || record?.status === statusFilter;
+                          return matchesRoom && matchesSearch && matchesStatus;
+                        });
                         const report = reportStudents.map(s => {
                           const meals = ['Breakfast', 'Lunch', 'Dinner'] as MealType[];
                           const mealData: any = {};
@@ -1316,7 +1365,13 @@ export default function App() {
                           </tr>
                         </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {sortedStudents.filter(s => roomFilter === 'All' || s.roomNumber === roomFilter).map(s => {
+                        {sortedStudents.filter(s => {
+                          const matchesRoom = roomFilter === 'All' || s.roomNumber === roomFilter;
+                          const matchesSearch = s.name.toLowerCase().includes(searchQuery.toLowerCase()) || s.studentId.includes(searchQuery);
+                          const record = attendance.find(a => a.studentId === s.studentId && a.mealType === selectedMeal);
+                          const matchesStatus = statusFilter === 'All' || record?.status === statusFilter;
+                          return matchesRoom && matchesSearch && matchesStatus;
+                        }).map(s => {
                           const getRecord = (mt: MealType) => attendance.find(a => a.studentId === s.studentId && a.mealType === mt);
                           return (
                             <tr key={s.studentId} className="hover:bg-slate-50 transition-colors">
@@ -1358,6 +1413,27 @@ export default function App() {
                       </tbody>
                     </table>
                   </div>
+                </div>
+
+                <div className="bg-white border-t border-slate-200 p-4 lg:p-5 flex flex-col lg:flex-row justify-between items-center gap-4 shrink-0 rounded-b-2xl shadow-sm">
+                  <div className="grid grid-cols-3 gap-6 lg:gap-12 w-full lg:w-auto">
+                    {(['Breakfast', 'Lunch', 'Dinner'] as MealType[]).map(mt => (
+                      <div key={mt} className="flex flex-col items-center lg:items-start gap-1">
+                        <span className="text-[8px] lg:text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          {mt === 'Breakfast' ? 'সকাল' : mt === 'Lunch' ? 'দুপুর' : 'রাত'}
+                        </span>
+                        <div className="flex gap-3 lg:gap-4">
+                          <span className="text-[10px] lg:text-xs font-bold text-emerald-600">
+                            P: {reportStats[mt].present}
+                          </span>
+                          <span className="text-[10px] lg:text-xs font-bold text-rose-600">
+                            A: {reportStats[mt].absent}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[8px] lg:text-[10px] uppercase tracking-widest font-black text-slate-400 hidden lg:block">© ২০২৬ ডাইনিং ম্যানেজমেন্ট সিস্টেম</p>
                 </div>
               </motion.div>
             )}
