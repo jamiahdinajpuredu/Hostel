@@ -54,7 +54,7 @@ app.get("/api/users", async (req, res) => {
 app.post("/api/register", async (req, res) => {
   const { username, password, name, role } = req.body;
   const data = await readData();
-  if (data.users.find((u: any) => u.username === username)) {
+  if (data.users.find((u: any) => u.username.toLowerCase() === username.toLowerCase())) {
     return res.status(400).json({ error: "Username already exists" });
   }
   const newUser = { username, password, name, role: role || 'Staff' };
@@ -66,7 +66,10 @@ app.post("/api/register", async (req, res) => {
 app.post("/api/login", async (req, res) => {
   const { username, password } = req.body;
   const data = await readData();
-  const user = data.users.find((u: any) => u.username === username && u.password === password);
+  const user = data.users.find((u: any) => 
+    u.username.toLowerCase() === username.toLowerCase() && 
+    u.password === password
+  );
   if (!user) {
     return res.status(401).json({ error: "Invalid credentials" });
   }
@@ -92,10 +95,23 @@ app.get("/api/students", async (req, res) => {
   res.json(data.students);
 });
 
-app.post("/api/students", async (req, res) => {
+app.delete("/api/students/:id", async (req, res) => {
+  const { id } = req.params;
+  const data = await readData();
+  data.students = data.students.filter((s: any) => s.studentId !== id);
+  await writeData(data);
+  res.json({ success: true });
+});
+
+app.post("/api/students/bulk", async (req, res) => {
   const { students } = req.body;
   const data = await readData();
-  data.students = students; // Replace or merge. For upload, user might mean replace.
+  // Merge by ID
+  students.forEach((newS: any) => {
+    const index = data.students.findIndex((s: any) => s.studentId === newS.studentId);
+    if (index > -1) data.students[index] = newS;
+    else data.students.push(newS);
+  });
   await writeData(data);
   res.json({ success: true, count: students.length });
 });

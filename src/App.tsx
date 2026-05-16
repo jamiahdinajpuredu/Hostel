@@ -25,7 +25,7 @@ import {
   LineChart
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { supabase, isSupabaseConfigured } from './lib/supabase';
+import { api } from './lib/api';
 import { Student, AttendanceRecord, MealType, User, AppSettings } from './types';
 
 export default function App() {
@@ -67,46 +67,17 @@ export default function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const handleGoogleLogin = async () => {
-    try {
-      setIsLoggingIn(true);
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-      });
-      if (error) throw error;
-    } catch (err: any) {
-      alert("Error: " + err.message);
-    } finally {
-      setIsLoggingIn(false);
-    }
+    alert("গুগল লগইন বর্তমানে নিষ্ক্রিয়। অনুগ্রহ করে ইউজারনেম ও পাসওয়ার্ড ব্যবহার করুন।");
   };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoggingIn(true);
     try {
-      const email = `${authForm.username.toLowerCase()}@hostel.internal`;
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password: authForm.password,
-      });
-      
-      if (error) throw error;
-
-      if (data.user) {
-        const { data: userData, error: userError } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', data.user.id)
-          .single();
-        
-        if (userData) {
-          setCurrentUser(userData as User);
-          localStorage.setItem('hostel_user', JSON.stringify(userData));
-          setView('dashboard');
-        } else {
-          alert("User record not found in database.");
-        }
-      }
+      const userData = await api.login({ username: authForm.username, password: authForm.password });
+      setCurrentUser(userData);
+      localStorage.setItem('hostel_user', JSON.stringify(userData));
+      setView('dashboard');
     } catch (err: any) {
       console.error(err);
       alert("ভুল ইউজারনেম বা পাসওয়ার্ড!");
@@ -118,58 +89,32 @@ export default function App() {
   const handleRegister = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     try {
-      const email = `${authForm.username.toLowerCase()}@hostel.internal`;
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password: authForm.password,
-        options: {
-          data: {
-            username: authForm.username,
-            full_name: authForm.name,
-          }
-        }
-      });
-      
-      if (error) throw error;
-
-      if (data.user) {
-        const newUser: User = { 
-          username: authForm.username, 
-          name: authForm.name, 
-          role: authForm.role || 'Staff' 
-        };
-
-        const { error: dbError } = await supabase
-          .from('users')
-          .insert({ id: data.user.id, ...newUser });
-
-        if (dbError) throw dbError;
-      }
-      
+      await api.register({ ...authForm });
       alert("ইউজার তৈরি সফল!");
       setAuthForm({ username: '', password: '', name: '', role: 'Staff' });
+      // Refresh user list
+      const updatedUsers = await api.getUsers();
+      setUsers(updatedUsers);
     } catch (err: any) {
+      console.error(err);
       alert(err.message || "ব্যর্থ হয়েছে!");
     }
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
     setCurrentUser(null);
     localStorage.removeItem('hostel_user');
   };
 
-  const handleDeleteUser = async (id: string) => {
+  const handleDeleteUser = async (username: string) => {
     if (!confirm("Are you sure you want to delete this user?")) return;
     try {
-      const { error } = await supabase
-        .from('users')
-        .delete()
-        .eq('id', id);
-      if (error) throw error;
+      await api.deleteUser(username);
       alert("ইউজার ডাটা ডিলিট সফল!");
-    } catch (err: any) {
-      alert("ডিলিট ব্যর্থ হয়েছে: " + err.message);
+      const updatedUsers = await api.getUsers();
+      setUsers(updatedUsers);
+    } catch (err) {
+      alert("ডিলিট ব্যর্থ হয়েছে।");
     }
   };
 
@@ -180,20 +125,17 @@ export default function App() {
       return;
     }
     try {
-      const { error } = await supabase
-        .from('students')
-        .upsert({
-          student_id: studentForm.studentId.trim(),
-          name: studentForm.name,
-          class_name: studentForm.className,
-          room_number: studentForm.roomNumber
-        });
-      
-      if (error) throw error;
-
+      await api.updateStudents([{
+        ...studentForm,
+        studentId: studentForm.studentId.trim()
+      }]);
       alert("ছাত্র যোগ করা সফল হয়েছে!");
       setStudentForm({ studentId: '', name: '', className: '', roomNumber: '' });
+      // Refresh students
+      const updated = await api.getStudents();
+      setStudents(updated);
     } catch (err: any) {
+      console.error(err);
       alert("ব্যর্থ হয়েছে: " + err.message);
     }
   };
@@ -201,14 +143,12 @@ export default function App() {
   const handleDeleteStudent = async (id: string) => {
     if (!confirm("আপনি কি নিশ্চিতভাবে এই ছাত্রের তথ্য ডিলিট করতে চান?")) return;
     try {
-      const { error } = await supabase
-        .from('students')
-        .delete()
-        .eq('student_id', id);
-      if (error) throw error;
+      await api.deleteStudent(id);
       alert("ছাত্র ডিলিট সফল!");
-    } catch (err: any) {
-      alert("ডিলিট ব্যর্থ হয়েছে: " + err.message);
+      const updated = await api.getStudents();
+      setStudents(updated);
+    } catch (err) {
+      alert("ডিলিট ব্যর্থ হয়েছে।");
     }
   };
 
@@ -236,33 +176,7 @@ export default function App() {
     return stats;
   }, [students, attendance, roomFilter]);
 
-  // Load initial data and Sync with Supabase
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        try {
-          const { data: userData, error } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', session.user.id)
-            .single();
-          
-          if (userData) {
-            setCurrentUser(userData as User);
-            localStorage.setItem('hostel_user', JSON.stringify(userData));
-          }
-        } catch (error) {
-          console.error("User fetch error:", error);
-        }
-      } else {
-        setCurrentUser(null);
-        localStorage.removeItem('hostel_user');
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
+  // Load initial data and Sync with Local API
   useEffect(() => {
     if (!currentUser) {
       setIsLoading(false);
@@ -273,72 +187,32 @@ export default function App() {
 
     const fetchData = async () => {
       try {
-        // Students
-        const { data: studentsData } = await supabase.from('students').select('*');
-        if (studentsData) {
-          setStudents(studentsData.map(s => ({
-            studentId: s.student_id,
-            name: s.name,
-            className: s.class_name,
-            roomNumber: s.room_number
-          })));
-        }
-
-        // Attendance
-        const { data: attendanceData } = await supabase
-          .from('attendance')
-          .select('*')
-          .eq('date', selectedDate);
-        if (attendanceData) {
-          setAttendance(attendanceData.map(a => ({
-            studentId: a.student_id,
-            date: a.date,
-            mealType: a.meal_type,
-            status: a.status,
-            timestamp: a.timestamp,
-            recordedBy: a.recorded_by
-          })));
-        }
-
-        // Settings
-        const { data: settingsData } = await supabase
-          .from('settings')
-          .select('*')
-          .eq('key', 'config')
-          .single();
-        if (settingsData) {
-          setSettings(settingsData.value);
-        }
-
-        // Users
+        const [studentsData, attendanceData, settingsData] = await Promise.all([
+          api.getStudents(),
+          api.getAttendance(selectedDate),
+          api.getSettings()
+        ]);
+        
+        setStudents(studentsData);
+        setAttendance(attendanceData);
+        setSettings(settingsData);
+        
         if (currentUser.role === 'Admin') {
-          const { data: usersData } = await supabase.from('users').select('*');
-          if (usersData) setUsers(usersData as User[]);
+          const usersData = await api.getUsers();
+          setUsers(usersData);
         }
       } catch (err) {
-        console.error("Data fetch error:", err);
+        console.error("Data load failed:", err);
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchData();
-
-    // Set up Realtime subscriptions
-    const studentsSub = supabase
-      .channel('students-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, fetchData)
-      .subscribe();
-
-    const attendanceSub = supabase
-      .channel('attendance-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, fetchData)
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(studentsSub);
-      supabase.removeChannel(attendanceSub);
-    };
+    
+    // Polling as a fallback for real-time (every 30s)
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
   }, [selectedDate, currentUser]);
 
   // Sync draft from existing attendance when switching meal
@@ -427,19 +301,20 @@ export default function App() {
   const presentCount = currentStudents.filter(s => draftAttendance[s.studentId]?.status === 'Present').length;
   const absentCount = currentStudents.filter(s => draftAttendance[s.studentId]?.status === 'Absent').length;
 
+  // Add this state to check if system is initialized
   const [systemEmpty, setSystemEmpty] = useState(false);
 
   useEffect(() => {
     const checkInit = async () => {
       try {
-        const { count, error } = await supabase
-          .from('users')
-          .select('*', { count: 'exact', head: true });
-        
-        if (error) throw error;
-        setSystemEmpty(count === 0);
+        const usersList = await api.getUsers();
+        if (usersList.length === 0) {
+          setSystemEmpty(true);
+        } else {
+          setSystemEmpty(false);
+        }
       } catch (e: any) {
-        console.error("Init check failed:", e.message);
+        console.warn("Check init failed:", e.message);
       }
     };
     checkInit();
@@ -447,73 +322,20 @@ export default function App() {
 
   const initializeAdmin = async () => {
     try {
-      const email = "admin@hostel.internal";
-      const { data, error } = await supabase.auth.signUp({
-        email,
+      await api.register({
+        username: 'admin',
         password: 'admin123',
+        name: 'Admin User',
+        role: 'Admin'
       });
       
-      if (error) throw error;
-      
-      if (data.user) {
-        await supabase.from('users').insert({
-          id: data.user.id,
-          username: 'admin',
-          name: 'Admin User',
-          role: 'Admin'
-        });
-      }
-
       alert("System Initialized! You can now login with admin / admin123");
       setSystemEmpty(false);
     } catch (err: any) {
+      console.error(err);
       alert("Initialization failed: " + err.message);
     }
   };
-
-  if (!isSupabaseConfigured) {
-    const urlMissing = !import.meta.env.VITE_SUPABASE_URL;
-    const keyMissing = !import.meta.env.VITE_SUPABASE_ANON_KEY;
-    
-    return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
-        <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl p-10 text-center space-y-6">
-          <div className="w-20 h-20 bg-amber-100 rounded-full flex items-center justify-center mx-auto text-amber-600">
-            <Settings size={40} className="animate-spin-slow" />
-          </div>
-          <div className="space-y-2">
-            <h2 className="text-2xl font-black text-slate-900">Supabase সেটআপ প্রয়োজন</h2>
-            <p className="text-slate-500 font-medium leading-relaxed">
-              আপনার অ্যাপটি চালানোর জন্য Supabase URL এবং API Key প্রয়োজন। দয়া করে সেটিংস মেনু থেকে এগুলো যোগ করুন।
-            </p>
-          </div>
-          <div className="bg-slate-50 p-4 rounded-2xl text-left border border-slate-100">
-            <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">স্ট্যাটাস:</p>
-            <div className="space-y-2 text-sm font-bold">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-600">URL Status:</span>
-                <span className={urlMissing ? "text-rose-500" : "text-emerald-500"}>
-                  {urlMissing ? "Missing ❌" : "Found ✅"}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-600">Key Status:</span>
-                <span className={keyMissing ? "text-rose-500" : "text-emerald-500"}>
-                  {keyMissing ? "Missing ❌" : "Found ✅"}
-                </span>
-              </div>
-            </div>
-            <div className="mt-4 pt-4 border-t border-slate-200">
-              <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">প্রয়োজনীয় নাম (Keys):</p>
-              <code className="block text-[10px] bg-white p-2 rounded border border-slate-200 font-mono mb-1">VITE_SUPABASE_URL</code>
-              <code className="block text-[10px] bg-white p-2 rounded border border-slate-200 font-mono">VITE_SUPABASE_ANON_KEY</code>
-            </div>
-          </div>
-          <p className="text-sm text-slate-400 font-bold">সেটিংস সেভ করার পর পেজটি রিফ্রেশ দিন।</p>
-        </div>
-      </div>
-    );
-  }
 
   if (!currentUser) {
     return (
@@ -554,7 +376,7 @@ export default function App() {
                   <span>D</span>
                 )}
               </div>
-              <h1 className="text-3xl font-black tracking-tight mb-2">বোডিং ম্যানেজমেন্ট</h1>
+              <h1 className="text-3xl font-black tracking-tight mb-2">বোডিং রুম</h1>
               <p className="text-[10px] text-indigo-300 uppercase font-black tracking-[0.3em] opacity-80">Institutional Entry System</p>
             </div>
           </div>
@@ -682,13 +504,14 @@ export default function App() {
       alert("আপনার এই কাজটি করার অনুমতি নেই।");
       return;
     }
-    const records = Object.entries(draftAttendance).map(([studentId, data]) => ({
-      student_id: studentId,
+    const records: AttendanceRecord[] = (Object.entries(draftAttendance) as [string, { status: 'Present' | 'Absent', timestamp?: string }][]).map(([studentId, data]) => ({
+      studentId,
       date: selectedDate,
-      meal_type: selectedMeal,
-      status: (data as any).status,
-      timestamp: (data as any).timestamp || new Date().toISOString(),
-      recorded_by: currentUser?.username
+      mealType: selectedMeal,
+      status: data.status,
+      timestamp: data.timestamp,
+      recordedBy: currentUser?.username,
+      updatedAt: new Date().toISOString()
     }));
 
     if (records.length === 0) {
@@ -697,16 +520,15 @@ export default function App() {
     }
 
     try {
-      const { error } = await supabase
-        .from('attendance')
-        .upsert(records, { onConflict: 'student_id,date,meal_type' });
-      
-      if (error) throw error;
-
+      await api.submitAttendance(records);
       setIsEditMode(false);
       alert("হাজিরা সফলভাবে সাবমিট করা হয়েছে!");
-    } catch (error: any) {
-      alert("সাবমিট ব্যর্থ হয়েছে: " + error.message);
+      // Refresh attendance
+      const updated = await api.getAttendance(selectedDate);
+      setAttendance(updated);
+    } catch (error) {
+      console.error("Failed to submit attendance", error);
+      alert("সাবমিট ব্যর্থ হয়েছে।");
     }
   };
 
@@ -723,30 +545,29 @@ export default function App() {
       
       const jsonData = XLSX.utils.sheet_to_json(worksheet);
       
-      const newStudents = jsonData.map((row: any) => {
+      const newStudents: Student[] = jsonData.map((row: any) => {
         const id = row.studentId || row.ID || row.id || row['Student ID'] || '';
         const name = row.name || row.Name || row['Student Name'] || '';
         const room = row.roomNumber || row.Room || row.room || row['Room No'] || '';
         const cls = row.className || row.Class || row.class || row['Class Name'] || '';
         
         return { 
-          student_id: String(id).trim(), 
+          studentId: String(id).trim(), 
           name: String(name).trim() || 'Unknown', 
-          room_number: String(room).trim() || 'None',
-          class_name: String(cls).trim() || 'General'
+          roomNumber: String(room).trim() || 'None',
+          className: String(cls).trim() || 'General'
         };
-      }).filter(s => s.student_id);
+      }).filter(s => s.studentId);
 
       if (newStudents.length > 0) {
         try {
-          const { error } = await supabase
-            .from('students')
-            .upsert(newStudents);
-          
-          if (error) throw error;
+          await api.updateStudents(newStudents);
           alert(`${newStudents.length} জন ছাত্রের ডাটা আপলোড সফল হয়েছে!`);
-        } catch (error: any) {
-          alert("আপলোড ব্যর্থ হয়েছে: " + error.message);
+          const updated = await api.getStudents();
+          setStudents(updated);
+        } catch (error) {
+          console.error("Upload failed", error);
+          alert("আপলোড ব্যর্থ হয়েছে। আবার চেষ্টা করুন।");
         }
       }
     };
@@ -1636,13 +1457,10 @@ export default function App() {
                     <button 
                       onClick={async () => {
                         try {
-                          const { error } = await supabase
-                            .from('settings')
-                            .upsert({ key: 'config', value: settings });
-                          
-                          if (error) throw error;
+                          await api.updateSettings(settings);
                           alert("লোগো আপডেট সফল হয়েছে!");
                         } catch (err: any) {
+                          console.error(err);
                           alert("আপডেট ব্যর্থ হয়েছে: " + err.message);
                         }
                       }}

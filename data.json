@@ -336,7 +336,7 @@
   "users": [
     {
       "username": "admin",
-      "password": "1234",
+      "password": "admin123",
       "name": "Admin",
       "role": "Admin"
     }

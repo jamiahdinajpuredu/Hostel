@@ -2,5 +2,5 @@
   "name": "Hostel Meal Attendance System",
   "description": "A room-based meal attendance management system for residential institutions with student data management and daily reports.",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
