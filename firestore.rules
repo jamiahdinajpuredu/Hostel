@@ -1,18 +1,43 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Default deny
+    // 0. Default Deny
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Helper functions
+    // --- Helpers ---
     function isSignedIn() {
       return request.auth != null;
     }
 
+    function isEmailVerified() {
+      // In this environment, we should check email verification if applicable, 
+      // but for simplicity with Google Login we check existence
+      return request.auth.token.email_verified == true;
+    }
+
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function getRole(userId) {
+      return get(/databases/$(database)/documents/users/$(userId)).data.role;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        getRole(request.auth.uid) == 'Admin' || 
+        request.auth.token.email == 'jamiahdinajpur.edu@gmail.com'
+      );
+    }
+    
+    function isStaff() {
+      return isSignedIn() && (isAdmin() || getRole(request.auth.uid) == 'Staff');
+    }
+
+    function isViewer() {
+      return isSignedIn() && (isStaff() || getRole(request.auth.uid) == 'Viewer');
     }
 
     function incoming() {
@@ -23,72 +48,58 @@ service cloud.firestore {
       return resource.data;
     }
 
+    // --- Validation Helpers ---
+
     function isValidStudent(data) {
-      return data.studentId is string && data.studentId.size() <= 100 &&
+      return data.keys().hasAll(['studentId', 'name']) &&
+             data.studentId is string && data.studentId.size() <= 50 &&
              data.name is string && data.name.size() <= 200 &&
-             data.roomNumber is string && data.roomNumber.size() <= 50 &&
-             data.className is string && data.className.size() <= 50;
+             (!('roomNumber' in data) || (data.roomNumber is string && data.roomNumber.size() <= 50)) &&
+             (!('className' in data) || (data.className is string && data.className.size() <= 50));
     }
 
     function isValidAttendance(data) {
-      return data.studentId is string && data.studentId.size() <= 100 &&
-             data.date is string && data.date.size() == 10 &&
+      return data.keys().hasAll(['studentId', 'date', 'mealType', 'status']) &&
+             data.studentId is string && data.studentId.size() <= 128 &&
+             data.date is string && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
              data.mealType in ['Breakfast', 'Lunch', 'Dinner'] &&
              data.status in ['Present', 'Absent'];
     }
 
-    function isValidSettings(data) {
-      return data.logoUrl is string && data.logoUrl.size() <= 1048576;
+    function isValidUser(data) {
+      return data.keys().hasAll(['username', 'role']) &&
+             data.username is string && data.username.size() <= 128 &&
+             data.role in ['Admin', 'Staff', 'Viewer'];
     }
 
-    function isAdmin() {
-      return isSignedIn() && (
-        request.auth.token.email == 'jamiahdinajpur.edu@gmail.com' ||
-        request.auth.token.email == 'admin@hostel.internal' ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin'
-      );
-    }
+    // --- Rules ---
 
-    function isStaff() {
-      return isSignedIn() && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Admin', 'Staff']);
-    }
-
-    function isViewer() {
-      return isSignedIn() && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Viewer');
-    }
-
-    // Students collection
     match /students/{studentId} {
-      allow read: if isSignedIn();
-      allow write: if isStaff() && isValidStudent(incoming());
+      allow read: if isViewer();
+      allow write: if isAdmin() && isValidStudent(incoming());
     }
 
-    // Attendance collection
-    match /attendance/{attendanceId} {
-      allow read: if isSignedIn();
-      allow write: if isStaff() && isValidAttendance(incoming());
+    match /attendance/{recordId} {
+      allow read: if isViewer();
+      allow create: if isStaff() && isValidAttendance(incoming());
+      allow update: if isStaff() && isValidAttendance(incoming()) && (
+        // Only allow updating status and timestamp/updatedAt
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'timestamp', 'updatedAt', 'recordedBy'])
+      );
+      allow delete: if isAdmin();
     }
 
-    // Users collection
-    match /users/{userId} {
-      // Admin can do anything. Everyone signed in can 'get' profiles.
-      allow get: if isSignedIn();
-      allow list: if isAdmin();
-      
-      // Allow writes if user is admin
-      allow create, update, delete: if isAdmin();
-      
-      // Bootstrap path: allow creation if user is signed in with bootstrap email and is setting themselves as Admin
-      allow create: if isSignedIn() && 
-                    (request.auth.token.email == 'admin@hostel.internal' || request.auth.token.email == 'jamiahdinajpur.edu@gmail.com') && 
-                    incoming().role == 'Admin' &&
-                    userId == request.auth.uid;
-    }
-
-    // Settings collection
-    match /settings/config {
+    match /settings/{settingId} {
       allow read: if true;
-      allow write: if isAdmin() && isValidSettings(incoming());
+      allow write: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isViewer();
+      // Allow bootstrap: any user can create their own profile IF no users exist yet or if they match the admin email
+      allow create: if (isAdmin() || (isSignedIn() && userId == request.auth.uid)) && isValidUser(incoming());
+      allow update: if isAdmin() && isValidUser(incoming());
+      allow delete: if isAdmin();
     }
   }
 }

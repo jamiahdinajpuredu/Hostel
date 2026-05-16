@@ -26,13 +26,13 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { api } from './lib/api';
+import { auth } from './lib/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 import { Student, AttendanceRecord, MealType, User, AppSettings } from './types';
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('hostel_user');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
   const [view, setView] = useState<'attendance' | 'students' | 'reports' | 'users' | 'dashboard'>('dashboard');
   const [students, setStudents] = useState<Student[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
@@ -47,6 +47,31 @@ export default function App() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          const usersList = await api.getUsers();
+          const profile = usersList.find(u => u.username.toLowerCase() === user.email?.split('@')[0]);
+          if (profile) {
+            setCurrentUser(profile);
+          } else {
+            // Fallback for admin email
+            if (user.email === 'jamiahdinajpur.edu@gmail.com') {
+              setCurrentUser({ username: 'admin', name: 'Super Admin', role: 'Admin' });
+            }
+          }
+        } catch (e) {
+          console.error("Auth sync failed", e);
+        }
+      } else {
+        setCurrentUser(null);
+      }
+      setAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -67,7 +92,16 @@ export default function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const handleGoogleLogin = async () => {
-    alert("গুগল লগইন বর্তমানে নিষ্ক্রিয়। অনুগ্রহ করে ইউজারনেম ও পাসওয়ার্ড ব্যবহার করুন।");
+    try {
+      setIsLoggingIn(true);
+      const userData = await api.loginWithGoogle();
+      setCurrentUser(userData);
+      setView('dashboard');
+    } catch (err: any) {
+      alert(err.message || "Google Login Failed!");
+    } finally {
+      setIsLoggingIn(false);
+    }
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -102,8 +136,16 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    setCurrentUser(null);
-    localStorage.removeItem('hostel_user');
+    try {
+      await api.logout();
+      setCurrentUser(null);
+      localStorage.removeItem('hostel_user');
+    } catch (err) {
+      console.error(err);
+      // Even if firebase logout fails, we clear state locally
+      setCurrentUser(null);
+      localStorage.removeItem('hostel_user');
+    }
   };
 
   const handleDeleteUser = async (username: string) => {
@@ -187,17 +229,23 @@ export default function App() {
 
     const fetchData = async () => {
       try {
-        const [studentsData, attendanceData, settingsData] = await Promise.all([
+        const settingsData = await api.getSettings();
+        setSettings(settingsData);
+
+        if (!auth.currentUser) {
+          setIsLoading(false);
+          return;
+        }
+
+        const [studentsData, attendanceData] = await Promise.all([
           api.getStudents(),
-          api.getAttendance(selectedDate),
-          api.getSettings()
+          api.getAttendance(selectedDate)
         ]);
         
         setStudents(studentsData);
         setAttendance(attendanceData);
-        setSettings(settingsData);
         
-        if (currentUser.role === 'Admin') {
+        if (currentUser?.role === 'Admin') {
           const usersData = await api.getUsers();
           setUsers(usersData);
         }
@@ -336,6 +384,15 @@ export default function App() {
       alert("Initialization failed: " + err.message);
     }
   };
+
+  if (!authReady || (isLoading && !currentUser)) {
+    return (
+      <div className="min-h-screen bg-indigo-900 flex flex-col items-center justify-center p-4">
+        <div className="w-12 h-12 border-4 border-white/20 border-t-white rounded-full animate-spin mb-4" />
+        <p className="text-white font-bold animate-pulse uppercase tracking-[0.2em] text-[10px]">Digital Hostel System - লোড হচ্ছে...</p>
+      </div>
+    );
+  }
 
   if (!currentUser) {
     return (

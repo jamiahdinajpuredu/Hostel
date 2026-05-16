@@ -2,7 +2,7 @@
   "entities": {
     "Student": {
       "title": "Student",
-      "description": "Student record in the hostel.",
+      "description": "Student information",
       "type": "object",
       "properties": {
         "studentId": { "type": "string" },
@@ -10,36 +10,37 @@
         "roomNumber": { "type": "string" },
         "className": { "type": "string" }
       },
-      "required": ["studentId", "name", "roomNumber", "className"]
+      "required": ["studentId", "name"]
     },
     "AttendanceRecord": {
       "title": "Attendance Record",
-      "description": "Log of student attendance for a specific meal.",
+      "description": "Individual meal attendance record",
       "type": "object",
       "properties": {
         "studentId": { "type": "string" },
-        "date": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
         "mealType": { "type": "string", "enum": ["Breakfast", "Lunch", "Dinner"] },
         "status": { "type": "string", "enum": ["Present", "Absent"] },
         "timestamp": { "type": "string" },
-        "recordedBy": { "type": "string" }
+        "recordedBy": { "type": "string" },
+        "updatedAt": { "type": "string" }
       },
       "required": ["studentId", "date", "mealType", "status"]
     },
     "User": {
       "title": "User",
-      "description": "System user (Admin or Staff).",
+      "description": "System user profile",
       "type": "object",
       "properties": {
         "username": { "type": "string" },
         "name": { "type": "string" },
-        "role": { "type": "string", "enum": ["Admin", "Staff"] }
+        "role": { "type": "string", "enum": ["Admin", "Staff", "Viewer"] }
       },
-      "required": ["username", "name", "role"]
+      "required": ["username", "role"]
     },
     "AppSettings": {
       "title": "App Settings",
-      "description": "Global application configuration.",
+      "description": "Global configuration",
       "type": "object",
       "properties": {
         "logoUrl": { "type": "string" }
@@ -49,19 +50,19 @@
   "firestore": {
     "/students/{studentId}": {
       "schema": "Student",
-      "description": "Collection of all students."
+      "description": "Students list"
     },
-    "/attendance/{attendanceId}": {
+    "/attendance/{recordId}": {
       "schema": "AttendanceRecord",
-      "description": "Collection of attendance logs."
+      "description": "Attendance records"
     },
-    "/users/{username}": {
+    "/users/{userId}": {
       "schema": "User",
-      "description": "Collection of system users. Username is the document ID."
+      "description": "User profiles"
     },
     "/settings/config": {
       "schema": "AppSettings",
-      "description": "Single document for app settings."
+      "description": "App configuration"
     }
   }
 }
