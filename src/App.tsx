@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { 
   Users, 
@@ -47,6 +47,8 @@ export default function App() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  
+  const lastSyncedKeyRef = useRef<string>('');
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -266,6 +268,16 @@ export default function App() {
   // Sync draft from existing attendance when switching meal
   useEffect(() => {
     if (!currentUser || isLoading) return;
+    
+    const currentKey = `${selectedDate}_${selectedMeal}`;
+    
+    // If the user is currently editing, we MUST NOT let background polling
+    // overwrite their unsaved changes. We only sync if they actually changed
+    // the meal or the date.
+    if (isEditMode && currentKey === lastSyncedKeyRef.current) {
+      return;
+    }
+    
     const mealAttendance = attendance.filter(a => a.mealType === selectedMeal);
     if (mealAttendance.length > 0) {
       const drafts: { [id: string]: { status: 'Present' | 'Absent', timestamp?: string } } = {};
@@ -276,7 +288,9 @@ export default function App() {
       setDraftAttendance({});
       setIsEditMode(true);
     }
-  }, [selectedMeal, attendance, currentUser, isLoading]);
+    
+    lastSyncedKeyRef.current = currentKey;
+  }, [selectedMeal, selectedDate, attendance, currentUser, isLoading]);
 
   // Dashboard Calculations
   const dashboardStats = useMemo(() => {
